@@ -1,5 +1,3 @@
-#ifdef USE_ARDUINO
-
 #include "air_conditioner.h"
 
 #include "esphome/core/log.h"
@@ -208,6 +206,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
     while (this->uart_->available()) {
       if (i < RX_LEN)
         this->uart_->read_byte(&RXData[i]);
+
       i++;
     }
     if (i == RX_LEN) {
@@ -234,7 +233,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
         }
       }
     } else {
-      ESP_LOGE(Constants::TAG, "Received incorrect message length from AC for Command %02X", cmdSent);
+      ESP_LOGE(Constants::TAG, "Received incorrect message length from AC for Command %02X with length %d", cmdSent, i);
       controlState = STATE_SEND_C0;
     }
   });
@@ -690,5 +689,3 @@ void AirConditioner::do_display_toggle() {
 }  // namespace ac
 }  // namespace midea
 }  // namespace esphome
-
-#endif  // USE_ARDUINO

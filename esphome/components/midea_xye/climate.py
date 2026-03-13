@@ -49,7 +49,7 @@ from esphome.components.climate import (
 )
 
 #CODEOWNERS = ["@dudanov"]
-DEPENDENCIES = ["climate", "uart", "wifi", "switch", "text_sensor"]
+DEPENDENCIES = ["climate", "uart", "switch", "text_sensor"]
 AUTO_LOAD = ["binary_sensor", "number", "sensor", "text_sensor"]
 CONF_OUTDOOR_TEMPERATURE = "outdoor_temperature"
 CONF_TEMPERATURE_2A = "temperature_2a"
@@ -247,8 +247,7 @@ CONFIG_SCHEMA = cv.All(
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
-    .extend(cv.COMPONENT_SCHEMA),
-    cv.only_with_arduino,
+    .extend(cv.COMPONENT_SCHEMA)
 )
 
 # Actions
