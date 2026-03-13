@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_ARDUINO
-
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/climate/climate_traits.h"
 #include "esphome/components/number/number.h"
@@ -264,5 +262,3 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
 }  // namespace ac
 }  // namespace midea
 }  // namespace esphome
-
-#endif  // USE_ARDUINO
