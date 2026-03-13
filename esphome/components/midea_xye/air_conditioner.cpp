@@ -203,13 +203,22 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
     // digitalWrite(ComControlPin, RS485_RX_PIN_VALUE);
 
     uint8_t i = 0;
+    uint8_t total_bytes = 0;
     while (this->uart_->available()) {
-      if (i < RX_LEN)
-        this->uart_->read_byte(&RXData[i]);
-
-      i++;
+      uint8_t byte = 0;
+      if (!this->uart_->read_byte(&byte)) {
+        break;
+      }
+      if (i < RX_LEN) {
+        RXData[i] = byte;
+        i++;
+      }
+      total_bytes++;
     }
     if (i == RX_LEN) {
+      if (total_bytes > RX_LEN) {
+        ESP_LOGW(Constants::TAG, "Received %d bytes for Command %02X, using first %d", total_bytes, cmdSent, RX_LEN);
+      }
       if (cmdSent != 0xC3) {
         ParseResponse(cmdSent);
       }
@@ -233,7 +242,8 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
         }
       }
     } else {
-      ESP_LOGE(Constants::TAG, "Received incorrect message length from AC for Command %02X with length %d", cmdSent, i);
+      ESP_LOGE(Constants::TAG, "Received incorrect message length from AC for Command %02X with length %d", cmdSent,
+               i);
       controlState = STATE_SEND_C0;
     }
   });
@@ -249,6 +259,7 @@ void AirConditioner::update() {
   // 4: Sending Query C4 Command
   switch (controlState) {
     case STATE_SEND_C3: {
+      // construct set command (includes preparing the data)
       setACParams();
       cmdSent = CLIENT_COMMAND_SET;
       sendRecv(cmdSent);
@@ -258,6 +269,9 @@ void AirConditioner::update() {
       // If the AC mode changed, follow-me should be
       // refreshed, if emulating the wired controller's
       // behavior.
+      
+      // prepared by do_follow_me
+      
       cmdSent = 0xC6;
       sendRecv(cmdSent);
       if (this->mode == ClimateMode::CLIMATE_MODE_OFF) {
@@ -274,15 +288,18 @@ void AirConditioner::update() {
       sendRecv(cmdSent);
       break;
     }
-    case STATE_SEND_C4: {
+    /*case STATE_SEND_C4: {
       prepareTXData(0xC4);
       cmdSent = 0xC4;
       sendRecv(cmdSent);
       break;
-    }
+    }*/
     case STATE_WAIT_DATA: {
       // Wait for data to processed. Do nothing during the loop.
       break;
+    }
+    default: {
+      controlState = STATE_SEND_C0;
     }
   }
 }
@@ -618,9 +635,11 @@ void AirConditioner::dump_config() {
 
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
 #ifdef USE_REMOTE_TRANSMITTER
+  ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d and remote transmitter", temperature, beeper);
   IrFollowMeData data(static_cast<uint8_t>(lroundf(temperature)), beeper);
   this->transmitter_.transmit(data);
 #else
+  ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d", temperature, beeper);
   prepareTXData(0xC6);
   if (followMeInit) {
     TXData[10] = 2;
