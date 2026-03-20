@@ -170,13 +170,22 @@ void AirConditioner::setACParams() {
   }
   // set temp
   // Data always comes in as C, but user may want it set in F.
-  if (this->use_fahrenheit_) {
-    float tgt_temp = ((9.0 / 5.0) * this->target_temperature + 32.0);
+  float target_temp = this->target_temperature;
 
-    TXData[8] = (int) tgt_temp + 0x87;  // Offset from actual to engineering value
-  } else {
-    TXData[8] = (int) this->target_temperature;
+  if (this->use_fahrenheit_) {
+    float tgt_temp = ((9.0 / 5.0) * target_temp + 32.0);
+
+    target_temp = tgt_temp + 0x87;  // Offset from actual to engineering value
   }
+  
+  if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
+    target_temp = ceilf(target_temp);
+  } else {
+    target_temp = floorf(target_temp);
+  }
+
+
+  TXData[8] = (int) target_temp;
 
   // set mode flags
   TXData[11] = ((this->preset == ClimatePreset::CLIMATE_PRESET_BOOST) * MODE_FLAG_AUX_HEAT) |
