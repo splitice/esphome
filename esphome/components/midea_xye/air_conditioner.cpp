@@ -473,7 +473,7 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
         if (need_publish)
           this->publish_state();
 
-        set_sensor(this->temperature_2a_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T2A_TEMP]));
+        set_sensor(this->temperature_2a_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T2A_TEMP]) / 2.0);
         set_sensor(this->temperature_2b_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T2B_TEMP]));
         set_sensor(this->temperature_3_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T3_TEMP]));
         set_sensor(this->current_sensor_, RXData[RX_C0_BYTE_CURRENT]);
@@ -657,7 +657,7 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
     followMeInit = true;
   }
   lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  TXData[11] = lastFollowMeTemperature;
+  TXData[11] = lastFollowMeTemperature * 2;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
   // Only send if mode is something other than off.
   // Wired controller does not send 0xC6 when off.
