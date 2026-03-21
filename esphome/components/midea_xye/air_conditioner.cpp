@@ -180,9 +180,9 @@ void AirConditioner::setACParams() {
   
   // this offset is a hack until I can figure out how the controller calculates the temp value.
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    target_temp = ceilf(target_temp - 3.0);
+    target_temp = ceilf(target_temp);
   } else {
-    target_temp = floorf(target_temp - 3.0);
+    target_temp = floorf(target_temp);
   }
 
 
