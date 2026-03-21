@@ -82,7 +82,7 @@ climate:
       name: Error Flags
     protect_flags:              # Optional. 
       name: Protect Flags
-    fan_speed:                  # Optional. Current fan speed (Off, Low, Medium, High)
+    fan_speed:                  # Optional. Current fan speed (Off, Auto, 1-7)
       name: Fan Speed
 
 ```
@@ -90,7 +90,7 @@ climate:
 # What works
 - Setting mode (off, auto, fan, cool, heat, dry).
 - Setting temperature. Can send in C or F. Handles AC results in C or F. Must manually set in YAML.
-- Setting fan mode (auto, low, med, high).
+- Setting fan mode (auto, numeric 1-7; 1 is lowest and 7 is highest).
 - Reading inside, outside air temperatures, inside coil temperature, and outside coil temperature.
 - Reading timer start/stop times (set by remote)
 - Follow-Me temperature. Point it at a sensor and this works well.

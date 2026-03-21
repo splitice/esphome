@@ -48,9 +48,17 @@
 
 #define FAN_MODE_AUTO 0x80
 #define FAN_MODE_OFF 0x00
-#define FAN_MODE_HIGH 0x01
-#define FAN_MODE_MEDIUM 0x02
-#define FAN_MODE_LOW 0x04
+#define FAN_SPEED_1 0x01
+#define FAN_SPEED_2 0x02
+#define FAN_SPEED_3 0x03
+#define FAN_SPEED_4 0x04
+#define FAN_SPEED_5 0x05
+#define FAN_SPEED_6 0x06
+#define FAN_SPEED_7 0x08
+
+#define FAN_MODE_HIGH FAN_SPEED_1
+#define FAN_MODE_MEDIUM FAN_SPEED_4
+#define FAN_MODE_LOW FAN_SPEED_7
 
 #define TEMP_SET_FAN_MODE 0xFF
 
