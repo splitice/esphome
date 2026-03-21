@@ -48,7 +48,7 @@ void AirConditioner::control(const ClimateCall &call) {
     followMeInit = false;
   }
   if (call.get_target_temperature().has_value())
-    this->target_temperature = call.get_target_temperature().value() - 1.0;
+    this->target_temperature = call.get_target_temperature().value();
   if (call.get_fan_mode().has_value())
     this->fan_mode = call.get_fan_mode().value();
   if (call.get_swing_mode().has_value())
@@ -118,6 +118,34 @@ void AirConditioner::prepareTXData(uint8_t command) {
   TXData[14] = CalculateCRC(TXData, TX_LEN);
 }
 
+uint8_t AirConditioner::adjust_target_temperature(float target_temperature) const {
+  float adjusted_target_temperature = target_temperature;
+  if (this->use_fahrenheit_) {
+    adjusted_target_temperature = ((9.0f / 5.0f) * adjusted_target_temperature + 32.0f) + 0x87;
+  }
+
+  if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
+    adjusted_target_temperature = ceilf(adjusted_target_temperature - 1);
+  } else {
+    adjusted_target_temperature = floorf(adjusted_target_temperature);
+  }
+
+  return static_cast<uint8_t>(adjusted_target_temperature);
+}
+
+float AirConditioner::read_target_temperature(uint8_t target_temperature, bool fahrenheit_encoded) const {
+  float ret
+  if (fahrenheit_encoded) {
+    ret = ((static_cast<float>(target_temperature) - 0x87f) - 32.0f) * 5.0f / 9.0f;
+  } else {
+    ret = static_cast<float>(target_temperature & 0xBF);
+  }
+  if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
+    ret += 1;
+  }
+  return ret
+}
+
 void AirConditioner::setACParams() {
   // construct set command
   prepareTXData(CLIENT_COMMAND_SET);
@@ -168,25 +196,7 @@ void AirConditioner::setACParams() {
     this->fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
     TXData[7] = FAN_MODE_AUTO;
   }
-  // set temp
-  // Data always comes in as C, but user may want it set in F.
-  float target_temp = this->target_temperature;
-
-  if (this->use_fahrenheit_) {
-    float tgt_temp = ((9.0 / 5.0) * target_temp + 32.0);
-
-    target_temp = tgt_temp + 0x87;  // Offset from actual to engineering value
-  }
-  
-  // this offset is a hack until I can figure out how the controller calculates the temp value.
-  if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    target_temp = ceilf(target_temp);
-  } else {
-    target_temp = floorf(target_temp);
-  }
-
-
-  TXData[8] = (int) target_temp;
+  TXData[8] = this->adjust_target_temperature(this->target_temperature);
 
   // set mode flags
   TXData[11] = ((this->preset == ClimatePreset::CLIMATE_PRESET_BOOST) * MODE_FLAG_AUX_HEAT) |
@@ -412,7 +422,8 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
           // In either case, don't update it if the user is the in middle of setting it to something new...
           //
           if ((!this->use_fahrenheit_) && (this->queuedCommand != STATE_SEND_C3)) {
-            update_property(this->target_temperature, (float) (RXData[RX_C0_BYTE_SET_TEMP] & 0xBF), need_publish);
+            update_property(this->target_temperature,
+                            this->read_target_temperature(RXData[RX_C0_BYTE_SET_TEMP], false), need_publish);
           }
           update_property(this->current_temperature, CalculateTemp(RXData[RX_C0_BYTE_T1_TEMP]), need_publish);
           if (fabs(this->current_temperature - CalculateTemp(RXData[RX_C0_BYTE_T2A_TEMP])) > 5.0) {
@@ -517,8 +528,7 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
             ForceReadNextCycle == 1)  // Don't update below states unless mode is an ON state
         {
           if ((this->use_fahrenheit_) && (this->queuedCommand != STATE_SEND_C3)) {
-            float incoming_target_temp = 0.0;
-            incoming_target_temp = (float) (((RXData[RX_C4_BYTE_SET_TEMP] - 0x87) - 32.0) * 5.0 / 9.0);
+            float incoming_target_temp = this->read_target_temperature(RXData[RX_C4_BYTE_SET_TEMP], true);
             if (incoming_target_temp != this->target_temperature) {
               need_publish = true;
               update_property(this->target_temperature, incoming_target_temp, need_publish);
