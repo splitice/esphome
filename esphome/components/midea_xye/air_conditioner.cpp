@@ -134,7 +134,7 @@ uint8_t AirConditioner::adjust_target_temperature(float target_temperature) cons
 }
 
 float AirConditioner::read_target_temperature(uint8_t target_temperature, bool fahrenheit_encoded) const {
-  float ret
+  float ret;
   if (fahrenheit_encoded) {
     ret = ((static_cast<float>(target_temperature) - 0x87f) - 32.0f) * 5.0f / 9.0f;
   } else {
