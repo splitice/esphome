@@ -11,67 +11,6 @@ const char *const Constants::FREEZE_PROTECTION = "Freeze Protection";
 const char *const Constants::SILENT = "Silent";
 const char *const Constants::TURBO = "Turbo";
 
-static const char *const NUMERIC_FAN_MODES[] = {"1", "2", "3", "4", "5", "6", "7"};
-
-static const char *fan_speed_to_custom_mode(uint8_t fan_speed) {
-  switch (fan_speed) {
-    case FAN_SPEED_1:
-      return "7";
-    case FAN_SPEED_2:
-      return "6";
-    case FAN_SPEED_3:
-      return "5";
-    case FAN_SPEED_4:
-      return "4";
-    case FAN_SPEED_5:
-      return "3";
-    case FAN_SPEED_6:
-      return "2";
-    case 0x07:
-    case FAN_SPEED_7:
-      return "1";
-    default:
-      return nullptr;
-  }
-}
-
-static bool custom_mode_to_fan_speed(const char *custom_mode, uint8_t &fan_speed) {
-  if (custom_mode == nullptr) {
-    return false;
-  }
-
-  if (strcmp(custom_mode, "1") == 0) {
-    fan_speed = FAN_SPEED_7;
-    return true;
-  }
-  if (strcmp(custom_mode, "2") == 0) {
-    fan_speed = FAN_SPEED_6;
-    return true;
-  }
-  if (strcmp(custom_mode, "3") == 0) {
-    fan_speed = FAN_SPEED_5;
-    return true;
-  }
-  if (strcmp(custom_mode, "4") == 0) {
-    fan_speed = FAN_SPEED_4;
-    return true;
-  }
-  if (strcmp(custom_mode, "5") == 0) {
-    fan_speed = FAN_SPEED_3;
-    return true;
-  }
-  if (strcmp(custom_mode, "6") == 0) {
-    fan_speed = FAN_SPEED_2;
-    return true;
-  }
-  if (strcmp(custom_mode, "7") == 0) {
-    fan_speed = FAN_SPEED_1;
-    return true;
-  }
-
-  return false;
-}
-
 static void set_sensor(Sensor *sensor, float value) {
   if (sensor != nullptr && (!sensor->has_state() || sensor->get_raw_state() != value))
     sensor->publish_state(value);
@@ -110,12 +49,8 @@ void AirConditioner::control(const ClimateCall &call) {
   }
   if (call.get_target_temperature().has_value())
     this->target_temperature = call.get_target_temperature().value();
-  if (call.get_fan_mode().has_value()) {
+  if (call.get_fan_mode().has_value())
     this->fan_mode = call.get_fan_mode().value();
-    this->clear_custom_fan_mode_();
-  } else if (call.has_custom_fan_mode()) {
-    this->set_custom_fan_mode_(call.get_custom_fan_mode());
-  }
   if (call.get_swing_mode().has_value())
     this->swing_mode = call.get_swing_mode().value();
   if (call.get_preset().has_value())
@@ -212,30 +147,21 @@ void AirConditioner::setACParams() {
   }
   // set fan mode
   if (this->mode != ClimateMode::CLIMATE_MODE_HEAT_COOL) {
-    if (this->has_custom_fan_mode()) {
-      uint8_t custom_fan_speed = FAN_MODE_AUTO;
-      if (custom_mode_to_fan_speed(this->get_custom_fan_mode().c_str(), custom_fan_speed)) {
-        TXData[7] = custom_fan_speed;
-      } else {
+    switch (this->fan_mode.value()) {
+      case ClimateFanMode::CLIMATE_FAN_AUTO:
         TXData[7] = FAN_MODE_AUTO;
-      }
-    } else {
-      switch (this->fan_mode.value_or(ClimateFanMode::CLIMATE_FAN_AUTO)) {
-        case ClimateFanMode::CLIMATE_FAN_AUTO:
-          TXData[7] = FAN_MODE_AUTO;
-          break;
-        case ClimateFanMode::CLIMATE_FAN_HIGH:
-          TXData[7] = FAN_MODE_HIGH;
-          break;
-        case ClimateFanMode::CLIMATE_FAN_MEDIUM:
-          TXData[7] = FAN_MODE_MEDIUM;
-          break;
-        case ClimateFanMode::CLIMATE_FAN_LOW:
-          TXData[7] = FAN_MODE_LOW;
-          break;
-        default:
-          TXData[7] = FAN_MODE_AUTO;
-      }
+        break;
+      case ClimateFanMode::CLIMATE_FAN_HIGH:
+        TXData[7] = FAN_MODE_HIGH;
+        break;
+      case ClimateFanMode::CLIMATE_FAN_MEDIUM:
+        TXData[7] = FAN_MODE_MEDIUM;
+        break;
+      case ClimateFanMode::CLIMATE_FAN_LOW:
+        TXData[7] = FAN_MODE_LOW;
+        break;
+      default:
+        TXData[7] = FAN_MODE_AUTO;
     }
   } else {
     // Auto is full-auto - can't set fan mode either.
@@ -405,6 +331,7 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
     switch (RXData[RX_BYTE_COMMAND_TYPE]) {
       case CLIENT_COMMAND_QUERY: {
         ClimateMode mode = ClimateMode::CLIMATE_MODE_OFF;
+        ClimateFanMode fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
         ClimatePreset preset = ClimatePreset::CLIMATE_PRESET_NONE;
 
         switch (RXData[RX_C0_BYTE_OP_MODE] & 0xEF) {
@@ -437,16 +364,22 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
         }
 
         uint8_t current_fan_speed = RXData[RX_C0_BYTE_FAN_MODE] & 0x0F;
-        bool fan_mode_changed = false;
+        switch (current_fan_speed) {
+          case FAN_MODE_HIGH:
+            fan_mode = ClimateFanMode::CLIMATE_FAN_HIGH;
+            break;
+          case FAN_MODE_MEDIUM:
+            fan_mode = ClimateFanMode::CLIMATE_FAN_MEDIUM;
+            break;
+          case FAN_MODE_LOW:
+            fan_mode = ClimateFanMode::CLIMATE_FAN_LOW;
+            break;
+          case FAN_MODE_OFF:
+            fan_mode = ClimateFanMode::CLIMATE_FAN_OFF;
+            break;
+        }
         if ((RXData[RX_C0_BYTE_FAN_MODE] & FAN_MODE_AUTO) == FAN_MODE_AUTO) {
-          fan_mode_changed = this->set_fan_mode_(ClimateFanMode::CLIMATE_FAN_AUTO);
-        } else if (current_fan_speed == FAN_MODE_OFF) {
-          fan_mode_changed = this->set_fan_mode_(ClimateFanMode::CLIMATE_FAN_OFF);
-        } else {
-          const char *custom_mode = fan_speed_to_custom_mode(current_fan_speed);
-          if (custom_mode != nullptr) {
-            fan_mode_changed = this->set_custom_fan_mode_(custom_mode);
-          }
+          fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
         }
 
         if (RXData[RX_C0_BYTE_MODE_FLAGS] & MODE_FLAG_AUX_HEAT)
@@ -457,7 +390,6 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
         bool need_publish = false;
 
         update_property(this->mode, mode, need_publish);
-        need_publish = need_publish || fan_mode_changed;
         if (mode == ClimateMode::CLIMATE_MODE_OFF) {
           if (this->action != climate::CLIMATE_ACTION_OFF) {
             this->action = climate::CLIMATE_ACTION_OFF;
@@ -556,15 +488,22 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
 #endif
         set_sensor(this->protect_flags_sensor_, protect_flags);
 #ifdef USE_TEXT_SENSOR
-        // Fan speed as text for Home Assistant: Off, Auto, 1-7
+        // Fan speed as text for Home Assistant: Off, Low, Medium, High
         const char *fan_speed_text = "Off";
-        if ((RXData[RX_C0_BYTE_FAN_MODE] & FAN_MODE_AUTO) == FAN_MODE_AUTO) {
-          fan_speed_text = "Auto";
-        } else {
-          const char *custom_mode = fan_speed_to_custom_mode(current_fan_speed);
-          if (custom_mode != nullptr) {
-            fan_speed_text = custom_mode;
-          }
+        switch (current_fan_speed) {
+          case FAN_MODE_LOW:
+            fan_speed_text = "Low";
+            break;
+          case FAN_MODE_MEDIUM:
+            fan_speed_text = "Medium";
+            break;
+          case FAN_MODE_HIGH:
+            fan_speed_text = "High";
+            break;
+          case FAN_MODE_OFF:
+          default:
+            fan_speed_text = "Off";
+            break;
         }
         set_text_sensor(this->fan_speed_sensor_, fan_speed_text);
 #endif
@@ -672,13 +611,12 @@ climate::ClimateTraits AirConditioner::traits() {
   traits.set_supported_swing_modes(this->supported_swing_modes_);
   traits.set_supported_presets(this->supported_presets_);
   traits.set_supported_custom_presets(this->supported_custom_presets_);
-  std::vector<const char *> supported_custom_fan_modes(NUMERIC_FAN_MODES,
-                                                        NUMERIC_FAN_MODES + sizeof(NUMERIC_FAN_MODES) / sizeof(NUMERIC_FAN_MODES[0]));
-  supported_custom_fan_modes.insert(supported_custom_fan_modes.end(), this->supported_custom_fan_modes_.begin(),
-                                    this->supported_custom_fan_modes_.end());
-  traits.set_supported_custom_fan_modes(supported_custom_fan_modes);
+  traits.set_supported_custom_fan_modes(this->supported_custom_fan_modes_);
   /* + MINIMAL SET OF CAPABILITIES */
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_AUTO);
+  traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_LOW);
+  traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_MEDIUM);
+  traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_HIGH);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_OFF);  // Can't set it but will be reported
 
   if (!traits.get_supported_modes().empty())
