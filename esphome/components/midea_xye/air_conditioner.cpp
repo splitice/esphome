@@ -141,7 +141,7 @@ float AirConditioner::read_target_temperature(uint8_t target_temperature, bool f
     ret = static_cast<float>(target_temperature & 0xBF);
   }
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    ret += 4;
+    ret += 5;
   }
   return ret;
 }
