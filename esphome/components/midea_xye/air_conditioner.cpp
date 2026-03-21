@@ -309,7 +309,7 @@ void AirConditioner::update() {
       break;
     }
     default: {
-      controlState = STATE_SEND_C0;
+      controlState = STATE_SEND_C3;
     }
   }
 }
