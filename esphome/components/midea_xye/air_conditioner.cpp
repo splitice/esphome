@@ -48,7 +48,7 @@ void AirConditioner::control(const ClimateCall &call) {
     followMeInit = false;
   }
   if (call.get_target_temperature().has_value())
-    this->target_temperature = call.get_target_temperature().value();
+    this->target_temperature = call.get_target_temperature().value() - 1.0;
   if (call.get_fan_mode().has_value())
     this->fan_mode = call.get_fan_mode().value();
   if (call.get_swing_mode().has_value())
@@ -180,7 +180,7 @@ void AirConditioner::setACParams() {
   
   // this offset is a hack until I can figure out how the controller calculates the temp value.
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    target_temp = ceilf(target_temp - 1.0);
+    target_temp = ceilf(target_temp);
   } else {
     target_temp = floorf(target_temp);
   }
