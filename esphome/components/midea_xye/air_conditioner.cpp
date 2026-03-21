@@ -125,7 +125,7 @@ uint8_t AirConditioner::adjust_target_temperature(float target_temperature) cons
   }
 
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    adjusted_target_temperature = ceilf(adjusted_target_temperature - 6);
+    adjusted_target_temperature = ceilf(adjusted_target_temperature - 4);
   } else {
     adjusted_target_temperature = floorf(adjusted_target_temperature);
   }
@@ -141,7 +141,7 @@ float AirConditioner::read_target_temperature(uint8_t target_temperature, bool f
     ret = static_cast<float>(target_temperature & 0xBF);
   }
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    ret += 6;
+    ret += 4;
   }
   return ret;
 }
