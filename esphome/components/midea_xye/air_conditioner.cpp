@@ -179,9 +179,9 @@ void AirConditioner::setACParams() {
   }
   
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
-    target_temp = ceilf(target_temp);
+    target_temp = ceilf(target_temp * 2);
   } else {
-    target_temp = floorf(target_temp);
+    target_temp = floorf(target_temp * 2);
   }
 
 
