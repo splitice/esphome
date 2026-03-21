@@ -143,7 +143,7 @@ float AirConditioner::read_target_temperature(uint8_t target_temperature, bool f
   if (this->mode == ClimateMode::CLIMATE_MODE_HEAT) {
     ret += 1;
   }
-  return ret
+  return ret;
 }
 
 void AirConditioner::setACParams() {
