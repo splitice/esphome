@@ -675,7 +675,14 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
   this->transmitter_.transmit(data);
 #else
   ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d", temperature, beeper);
-  prepareTXData(0xC6);
+  
+
+  setACParams();
+  
+  TXData[1] = 0xC6;
+  TXData[13] = 0xFF - 0xC6;
+
+
   if (followMeInit) {
     TXData[10] = 2;
   } else {
