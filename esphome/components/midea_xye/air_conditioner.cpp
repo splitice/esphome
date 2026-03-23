@@ -663,6 +663,8 @@ void AirConditioner::dump_config() {
 
 /* ACTIONS */
 
+uint8_t test_follow_me = 15;
+
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
 #ifdef USE_REMOTE_TRANSMITTER
   ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d and remote transmitter", temperature, beeper);
@@ -678,7 +680,8 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
     followMeInit = true;
   }
   lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  TXData[11] = 17; // lastFollowMeTemperature;
+  lastFollowMeTemperature = test_follow_me++;
+  TXData[11] = lastFollowMeTemperature; // lastFollowMeTemperature;
   TXData[14] = 0;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
   // Only send if mode is something other than off.
