@@ -74,7 +74,7 @@ void AirConditioner::setup() {
   controlState = STATE_SEND_C0;
   ForceReadNextCycle = 1;
   followMeInit = false;
-  lastFollowMeTemperature = -999
+  lastFollowMeTemperature = 0;
 
   // Start up in Auto fan mode (since unit doesn't report it correctly)
   this->fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
@@ -294,7 +294,7 @@ void AirConditioner::update() {
       // prepared by do_follow_me
 
       if(TXData[1] != 0xC6) {
-        if(lastFollowMeTemperature == -999) {      
+        if(lastFollowMeTemperature == 0) {      
           controlState = STATE_SEND_C3;
           break;
         }
