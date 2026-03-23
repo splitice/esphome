@@ -321,7 +321,10 @@ void AirConditioner::update() {
     case STATE_SEND_C4: {
       // extended query
       setACParams();
-      prepareTXData(0xC4);
+      
+      TXData[1] = command;
+      TXData[13] = 0xFF - TXData[1];
+
       cmdSent = 0xC4;
       sendRecv(cmdSent);
       break;
