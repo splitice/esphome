@@ -318,12 +318,12 @@ void AirConditioner::update() {
       sendRecv(cmdSent);
       break;
     }
-    /*case STATE_SEND_C4: {
+    case STATE_SEND_C4: {
       prepareTXData(0xC4);
       cmdSent = 0xC4;
       sendRecv(cmdSent);
       break;
-    }*/
+    }
     case STATE_WAIT_DATA: {
       // Wait for data to processed. Do nothing during the loop.
       break;
@@ -663,8 +663,6 @@ void AirConditioner::dump_config() {
 
 /* ACTIONS */
 
-uint8_t test_follow_me = 35;
-
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
 #ifdef USE_REMOTE_TRANSMITTER
   ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d and remote transmitter", temperature, beeper);
@@ -680,8 +678,7 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
     followMeInit = true;
   }
   lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  lastFollowMeTemperature = test_follow_me+=30;
-  TXData[11] = lastFollowMeTemperature; // lastFollowMeTemperature;
+  TXData[11] = 17; // lastFollowMeTemperature;
   TXData[14] = 0;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
   // Only send if mode is something other than off.
