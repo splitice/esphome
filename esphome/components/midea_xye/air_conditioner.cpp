@@ -116,7 +116,6 @@ void AirConditioner::prepareTXData(uint8_t command) {
   TXData[12] = 0;
   TXData[13] = 0xFF - TXData[1];
   TXData[15] = PROLOGUE;
-  TXData[14] = 0;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
 }
 
@@ -690,8 +689,7 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
     followMeInit = true;
   }
   lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  TXData[11] = 17; // lastFollowMeTemperature;
-  TXData[14] = 0;
+  TXData[11] = lastFollowMeTemperature;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
   // Only send if mode is something other than off.
   // Wired controller does not send 0xC6 when off.
