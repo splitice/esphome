@@ -116,6 +116,7 @@ void AirConditioner::prepareTXData(uint8_t command) {
   TXData[12] = 0;
   TXData[13] = 0xFF - TXData[1];
   TXData[15] = PROLOGUE;
+  TXData[14] = 0;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
 }
 
