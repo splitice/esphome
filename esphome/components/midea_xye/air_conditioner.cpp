@@ -663,7 +663,7 @@ void AirConditioner::dump_config() {
 
 /* ACTIONS */
 
-uint8_t test_follow_me = 15;
+uint8_t test_follow_me = 35;
 
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
 #ifdef USE_REMOTE_TRANSMITTER
