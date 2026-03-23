@@ -322,8 +322,8 @@ void AirConditioner::update() {
       // extended query
       setACParams();
       
-      TXData[1] = command;
-      TXData[13] = 0xFF - TXData[1];
+      TXData[1] = 0xC4;
+      TXData[13] = 0xFF - 0xC4;
 
       cmdSent = 0xC4;
       sendRecv(cmdSent);
