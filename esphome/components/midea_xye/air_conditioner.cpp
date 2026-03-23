@@ -680,7 +680,7 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
     followMeInit = true;
   }
   lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  lastFollowMeTemperature = test_follow_me++;
+  lastFollowMeTemperature = test_follow_me+=30;
   TXData[11] = lastFollowMeTemperature; // lastFollowMeTemperature;
   TXData[14] = 0;
   TXData[14] = CalculateCRC(TXData, TX_LEN);
