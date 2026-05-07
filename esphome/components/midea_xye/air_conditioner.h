@@ -50,7 +50,7 @@
 #define FAN_MODE_OFF 0x00
 #define FAN_MODE_HIGH 0x01
 #define FAN_MODE_MEDIUM 0x02
-#define FAN_MODE_LOW 0x04
+#define FAN_MODE_LOW 0x03
 
 #define TEMP_SET_FAN_MODE 0xFF
 
