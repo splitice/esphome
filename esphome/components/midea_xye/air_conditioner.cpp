@@ -291,8 +291,8 @@ void AirConditioner::update() {
       // prepared by do_follow_me
 
       if(TXData[1] != 0xC6) {
-        if(lastFollowMeTemperature == 0) {      
-          controlState = STATE_SEND_C3;
+        if(lastFollowMeTemperature == 0) {
+          controlState = STATE_SEND_C0;
           break;
         }
         this->do_follow_me(lastFollowMeTemperature, false);
