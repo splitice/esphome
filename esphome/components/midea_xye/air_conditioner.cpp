@@ -252,7 +252,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
             controlState = STATE_SEND_C6;
             break;
           case 0xC4:
-            controlState = STATE_SEND_C0;
+            controlState = STATE_SEND_C3;
             break;
           case 0xC6:
             controlState = STATE_SEND_C0;
