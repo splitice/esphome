@@ -1,5 +1,8 @@
 #include "air_conditioner.h"
 
+#include <cstdio>
+#include <cstring>
+
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -42,7 +45,25 @@ template<typename T> void update_property(T &property, const T &value, bool &fla
   }
 }
 
+static void log_vrf_frame(const char *prefix, const uint8_t *frame, uint8_t len) {
+  char hex[(VRF_RX_MAX_LEN * 3) + 1];
+  size_t pos = 0;
+  for (uint8_t i = 0; i < len && pos < sizeof(hex); i++) {
+    int written = snprintf(hex + pos, sizeof(hex) - pos, "%02X%s", frame[i], (i + 1 < len) ? " " : "");
+    if (written <= 0)
+      break;
+    pos += static_cast<size_t>(written);
+  }
+  hex[sizeof(hex) - 1] = 0;
+  ESP_LOGD(Constants::TAG, "%s %s", prefix, hex);
+}
+
 void AirConditioner::control(const ClimateCall &call) {
+  if (this->vrf_protocol_) {
+    this->control_vrf(call);
+    return;
+  }
+
   if (call.get_mode().has_value()) {
     this->mode = call.get_mode().value();
     followMeInit = false;
@@ -71,13 +92,25 @@ void AirConditioner::setup() {
   } else {
     this->last_on_mode_ = ClimateMode::CLIMATE_MODE_COOL;
   }
+  if (this->vrf_protocol_ && !EncodeVrfMode(this->last_on_mode_, this->vrf_last_mode_nibble_)) {
+    this->last_on_mode_ = ClimateMode::CLIMATE_MODE_COOL;
+    this->vrf_last_mode_nibble_ = 0x02;
+  }
   controlState = STATE_SEND_C0;
   ForceReadNextCycle = 1;
   followMeInit = false;
   lastFollowMeTemperature = 0;
+  this->vrf_waiting_response_ = false;
+  this->vrf_queue_head_ = 0;
+  this->vrf_queue_tail_ = 0;
+  this->vrf_queue_count_ = 0;
 
   // Start up in Auto fan mode (since unit doesn't report it correctly)
   this->fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
+
+  if (this->vrf_protocol_ && this->use_fahrenheit_) {
+    ESP_LOGW(Constants::TAG, "VRF protocol uses Celsius setpoints; Fahrenheit encoding will be ignored.");
+  }
 
 #ifdef USE_SWITCH
   if (this->use_fahrenheit_switch_ != nullptr) {
@@ -88,6 +121,15 @@ void AirConditioner::setup() {
 
 // TODO: Not sure if we really need this.
 void AirConditioner::setPowerState(bool state) {
+  if (this->vrf_protocol_) {
+    ClimateMode mode = state ? this->last_on_mode_ : ClimateMode::CLIMATE_MODE_OFF;
+    if (!this->queue_vrf_mode_command(mode) && state) {
+      this->queue_vrf_mode_command(ClimateMode::CLIMATE_MODE_COOL);
+    }
+    this->publish_state();
+    return;
+  }
+
   if (state)
     this->mode = this->last_on_mode_;
   else
@@ -98,6 +140,91 @@ void AirConditioner::setPowerState(bool state) {
   } else {
     queuedCommand = STATE_SEND_C3;
   }
+}
+
+void AirConditioner::control_vrf(const ClimateCall &call) {
+  bool need_publish = false;
+
+  if (call.get_mode().has_value()) {
+    need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
+  }
+  if (call.get_target_temperature().has_value()) {
+    need_publish |= this->queue_vrf_temperature_command(call.get_target_temperature().value());
+  }
+  if (call.get_fan_mode().has_value()) {
+    ESP_LOGW(Constants::TAG, "VRF fan control is not implemented; ignoring fan mode command.");
+  }
+  if (call.get_swing_mode().has_value()) {
+    ESP_LOGW(Constants::TAG, "VRF swing control is not implemented; ignoring swing mode command.");
+  }
+  if (call.get_preset().has_value()) {
+    ESP_LOGW(Constants::TAG, "VRF preset control is not implemented; ignoring preset command.");
+  }
+
+  if (need_publish) {
+    this->publish_state();
+  }
+}
+
+bool AirConditioner::queue_vrf_payload(const uint8_t *payload, uint8_t len) {
+  if (len > VRF_PAYLOAD_MAX_LEN) {
+    ESP_LOGW(Constants::TAG, "Cannot queue VRF payload with length %d > %d", len, VRF_PAYLOAD_MAX_LEN);
+    return false;
+  }
+  if (this->vrf_queue_count_ >= VRF_QUEUE_LEN) {
+    ESP_LOGW(Constants::TAG, "Cannot queue VRF payload; queue is full");
+    return false;
+  }
+
+  VrfPayload &queued = this->vrf_queue_[this->vrf_queue_tail_];
+  queued.len = len;
+  memcpy(queued.data, payload, len);
+  this->vrf_queue_tail_ = (this->vrf_queue_tail_ + 1) % VRF_QUEUE_LEN;
+  this->vrf_queue_count_++;
+  return true;
+}
+
+bool AirConditioner::queue_vrf_mode_command(ClimateMode mode) {
+  uint8_t value = 0;
+
+  if (mode == ClimateMode::CLIMATE_MODE_OFF) {
+    value = this->vrf_last_mode_nibble_;
+  } else {
+    uint8_t mode_nibble = 0;
+    if (!EncodeVrfMode(mode, mode_nibble)) {
+      ESP_LOGW(Constants::TAG, "VRF mode %d is not supported", mode);
+      return false;
+    }
+    value = 0x40 | mode_nibble;
+  }
+
+  const uint8_t payload[] = {0x01, 0x00, value};
+  if (!this->queue_vrf_payload(payload, sizeof(payload))) {
+    return false;
+  }
+
+  if (mode == ClimateMode::CLIMATE_MODE_OFF) {
+    this->mode = ClimateMode::CLIMATE_MODE_OFF;
+    this->action = climate::CLIMATE_ACTION_OFF;
+  } else {
+    this->mode = mode;
+    this->last_on_mode_ = mode;
+    this->vrf_last_mode_nibble_ = value & 0x0F;
+    this->action =
+        (mode == ClimateMode::CLIMATE_MODE_FAN_ONLY) ? climate::CLIMATE_ACTION_FAN : climate::CLIMATE_ACTION_IDLE;
+  }
+  return true;
+}
+
+bool AirConditioner::queue_vrf_temperature_command(float target_temperature) {
+  uint8_t encoded = EncodeVrfTemp(target_temperature);
+  const uint8_t payload[] = {0x01, 0x03, encoded, 0x04, encoded, 0x02, encoded};
+  if (!this->queue_vrf_payload(payload, sizeof(payload))) {
+    return false;
+  }
+
+  this->target_temperature = DecodeVrfTemp(encoded);
+  return true;
 }
 
 void AirConditioner::prepareTXData(uint8_t command) {
@@ -268,6 +395,11 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
 }
 
 void AirConditioner::update() {
+  if (this->vrf_protocol_) {
+    this->update_vrf();
+    return;
+  }
+
   uint8_t cmdSent = 0x00;
   // Possible States:
   // 0: Waiting for Response from Command
@@ -335,6 +467,164 @@ void AirConditioner::update() {
   }
 }
 
+void AirConditioner::update_vrf() {
+  if (this->vrf_waiting_response_) {
+    return;
+  }
+
+  if (this->vrf_queue_count_ > 0) {
+    const VrfPayload &payload = this->vrf_queue_[this->vrf_queue_head_];
+    this->send_vrf_payload(payload.data, payload.len);
+    this->vrf_queue_head_ = (this->vrf_queue_head_ + 1) % VRF_QUEUE_LEN;
+    this->vrf_queue_count_--;
+    return;
+  }
+
+  const uint8_t payload[] = {VRF_POLL_REQUEST};
+  this->send_vrf_payload(payload, sizeof(payload));
+}
+
+void AirConditioner::send_vrf_payload(const uint8_t *payload, uint8_t len) {
+  if (len > VRF_PAYLOAD_MAX_LEN) {
+    ESP_LOGW(Constants::TAG, "Cannot send VRF payload with length %d > %d", len, VRF_PAYLOAD_MAX_LEN);
+    return;
+  }
+
+  uint8_t frame[VRF_FRAME_MAX_LEN];
+  frame[0] = PREAMBLE;
+  frame[1] = VRF_COMMAND_STATUS;
+  frame[2] = SERVER_ID;
+  frame[3] = 0x00;
+  frame[4] = CLIENT_ID;
+  frame[5] = 0x00;
+  frame[6] = len;
+  memcpy(&frame[7], payload, len);
+
+  uint16_t crc = CalculateVrfCRC(&frame[1], 6 + len);
+  uint8_t crc_pos = 7 + len;
+  frame[crc_pos] = crc & 0xFF;
+  frame[crc_pos + 1] = (crc >> 8) & 0xFF;
+  frame[crc_pos + 2] = PROLOGUE;
+  frame[crc_pos + 3] = VRF_FRAME_END_2;
+
+  uint8_t frame_len = 11 + len;
+  log_vrf_frame("VRF TX:", frame, frame_len);
+  this->uart_->write_array(frame, frame_len);
+  this->uart_->flush();
+  this->vrf_waiting_response_ = true;
+
+  this->set_timeout("vrf-read-result", this->response_timeout, [this]() {
+    uint8_t frame[VRF_RX_MAX_LEN];
+    uint8_t i = 0;
+    uint16_t total_bytes = 0;
+    while (this->uart_->available()) {
+      uint8_t byte = 0;
+      if (!this->uart_->read_byte(&byte)) {
+        break;
+      }
+      if (i < VRF_RX_MAX_LEN) {
+        frame[i] = byte;
+        i++;
+      }
+      total_bytes++;
+    }
+
+    this->vrf_waiting_response_ = false;
+    if (i == 0) {
+      ESP_LOGD(Constants::TAG, "No VRF response received");
+      return;
+    }
+    if (total_bytes > i) {
+      ESP_LOGW(Constants::TAG, "Received %d VRF bytes, using first %d", static_cast<int>(total_bytes),
+               static_cast<int>(i));
+    }
+
+    uint8_t start = 0;
+    while (start < i && frame[start] != PREAMBLE) {
+      start++;
+    }
+    if (start >= i) {
+      ESP_LOGW(Constants::TAG, "Received VRF data without frame preamble");
+      return;
+    }
+    if (start > 0) {
+      ESP_LOGW(Constants::TAG, "Skipping %d byte(s) before VRF frame preamble", static_cast<int>(start));
+    }
+
+    this->parse_vrf_response(&frame[start], i - start);
+  });
+}
+
+void AirConditioner::parse_vrf_response(const uint8_t *frame, uint8_t len) {
+  if (len < 11) {
+    ESP_LOGW(Constants::TAG, "Received short VRF frame with length %d", len);
+    return;
+  }
+  if (frame[0] != PREAMBLE || frame[1] != VRF_COMMAND_STATUS) {
+    ESP_LOGW(Constants::TAG, "Received invalid VRF frame header");
+    return;
+  }
+
+  uint8_t payload_len = frame[6];
+  uint8_t expected_len = 11 + payload_len;
+  if (len < expected_len) {
+    ESP_LOGW(Constants::TAG, "Received incomplete VRF frame with length %d, expected %d", len, expected_len);
+    return;
+  }
+  if (frame[expected_len - 2] != PROLOGUE || frame[expected_len - 1] != VRF_FRAME_END_2) {
+    ESP_LOGW(Constants::TAG, "Received VRF frame with invalid terminator");
+    return;
+  }
+
+  uint16_t received_crc = frame[expected_len - 4] | (static_cast<uint16_t>(frame[expected_len - 3]) << 8);
+  uint16_t calculated_crc = CalculateVrfCRC(&frame[1], 6 + payload_len);
+  if (received_crc != calculated_crc) {
+    ESP_LOGW(Constants::TAG, "Received VRF frame with invalid CRC %04X != %04X",
+             static_cast<unsigned>(received_crc), static_cast<unsigned>(calculated_crc));
+    return;
+  }
+
+  log_vrf_frame("VRF RX:", frame, expected_len);
+
+  // Short 0x23 frames may be command echoes/acks. Status frames carry at least
+  // enough payload for pwr/mode, fan, setpoint, and swing bytes.
+  if (payload_len < 11) {
+    ESP_LOGD(Constants::TAG, "VRF frame payload length %d is too short for status parsing", payload_len);
+    return;
+  }
+
+  uint8_t pwr_mode = frame[8];
+  uint8_t mode_nibble = pwr_mode & 0x0F;
+  bool powered = (pwr_mode & 0xF0) == 0x40;
+  bool need_publish = false;
+
+  if (powered) {
+    ClimateMode decoded_mode;
+    if (DecodeVrfMode(mode_nibble, decoded_mode)) {
+      update_property(this->mode, decoded_mode, need_publish);
+      this->last_on_mode_ = decoded_mode;
+      this->vrf_last_mode_nibble_ = mode_nibble;
+      climate::ClimateAction action =
+          (decoded_mode == ClimateMode::CLIMATE_MODE_FAN_ONLY) ? climate::CLIMATE_ACTION_FAN
+                                                               : climate::CLIMATE_ACTION_IDLE;
+      update_property(this->action, action, need_publish);
+    } else {
+      ESP_LOGW(Constants::TAG, "Received unknown VRF mode nibble %02X", mode_nibble);
+    }
+  } else {
+    update_property(this->mode, ClimateMode::CLIMATE_MODE_OFF, need_publish);
+    update_property(this->action, climate::CLIMATE_ACTION_OFF, need_publish);
+  }
+
+  update_property(this->target_temperature, DecodeVrfTemp(frame[10]), need_publish);
+  ESP_LOGD(Constants::TAG, "VRF status pwr/mode=%02X fan=%02X setpoint=%.1f swing=%02X", pwr_mode, frame[9],
+           DecodeVrfTemp(frame[10]), frame[17]);
+
+  if (need_publish) {
+    this->publish_state();
+  }
+}
+
 uint8_t AirConditioner::CalculateCRC(uint8_t *data, uint8_t len) {
   uint32_t crc = 0;
   for (uint8_t i = 0; i < len; i++) {
@@ -343,6 +633,21 @@ uint8_t AirConditioner::CalculateCRC(uint8_t *data, uint8_t len) {
     }
   }
   return 0xFF - (crc & 0xFF);
+}
+
+uint16_t AirConditioner::CalculateVrfCRC(const uint8_t *data, uint8_t len) {
+  uint16_t crc = 0xFFFF;
+  for (uint8_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; bit++) {
+      if (crc & 0x0001) {
+        crc = (crc >> 1) ^ 0xA001;
+      } else {
+        crc >>= 1;
+      }
+    }
+  }
+  return crc;
 }
 
 void AirConditioner::ParseResponse(uint8_t cmdSent) {
@@ -621,13 +926,77 @@ uint32_t AirConditioner::CalculateGetTime(uint8_t time) {
 
 float AirConditioner::CalculateTemp(uint8_t byte) { return (byte - 0x28) / 2.0; }
 
+uint8_t AirConditioner::EncodeVrfTemp(float celsius) {
+  if (celsius < 17.0f) {
+    celsius = 17.0f;
+  } else if (celsius > 30.0f) {
+    celsius = 30.0f;
+  }
+
+  return static_cast<uint8_t>(lroundf((celsius - 24.0f) * 2.0f) + 0x80);
+}
+
+float AirConditioner::DecodeVrfTemp(uint8_t byte) { return 24.0f + (static_cast<int>(byte) - 0x80) / 2.0f; }
+
+bool AirConditioner::EncodeVrfMode(ClimateMode mode, uint8_t &nibble) {
+  switch (mode) {
+    case ClimateMode::CLIMATE_MODE_FAN_ONLY:
+      nibble = 0x01;
+      return true;
+    case ClimateMode::CLIMATE_MODE_COOL:
+      nibble = 0x02;
+      return true;
+    case ClimateMode::CLIMATE_MODE_HEAT:
+      nibble = 0x03;
+      return true;
+    case ClimateMode::CLIMATE_MODE_DRY:
+      nibble = 0x06;
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool AirConditioner::DecodeVrfMode(uint8_t nibble, ClimateMode &mode) {
+  switch (nibble) {
+    case 0x01:
+      mode = ClimateMode::CLIMATE_MODE_FAN_ONLY;
+      return true;
+    case 0x02:
+      mode = ClimateMode::CLIMATE_MODE_COOL;
+      return true;
+    case 0x03:
+      mode = ClimateMode::CLIMATE_MODE_HEAT;
+      return true;
+    case 0x06:
+      mode = ClimateMode::CLIMATE_MODE_DRY;
+      return true;
+    default:
+      return false;
+  }
+}
+
 climate::ClimateTraits AirConditioner::traits() {
   auto traits = climate::ClimateTraits();
-  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   traits.set_visual_min_temperature(17);
   traits.set_visual_max_temperature(30);
-  traits.set_visual_temperature_step(1.0);
+  traits.set_visual_temperature_step(this->vrf_protocol_ ? 0.5 : 1.0);
+
+  if (this->vrf_protocol_) {
+    auto supported_modes = this->supported_modes_;
+    supported_modes.erase(ClimateMode::CLIMATE_MODE_HEAT_COOL);
+    if (supported_modes.empty()) {
+      supported_modes.insert({ClimateMode::CLIMATE_MODE_COOL, ClimateMode::CLIMATE_MODE_HEAT,
+                              ClimateMode::CLIMATE_MODE_DRY, ClimateMode::CLIMATE_MODE_FAN_ONLY});
+    }
+    traits.set_supported_modes(supported_modes);
+    if (!traits.get_supported_modes().empty())
+      traits.add_supported_mode(ClimateMode::CLIMATE_MODE_OFF);
+    return traits;
+  }
+
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.set_supported_modes(this->supported_modes_);
   traits.set_supported_swing_modes(this->supported_swing_modes_);
   traits.set_supported_presets(this->supported_presets_);
@@ -652,6 +1021,7 @@ climate::ClimateTraits AirConditioner::traits() {
 
 void AirConditioner::dump_config() {
   ESP_LOGCONFIG(Constants::TAG, "MideaXYE:");
+  ESP_LOGCONFIG(Constants::TAG, "  [x] Protocol: %s", this->vrf_protocol_ ? "VRF" : "XYE");
   ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %dms", this->get_update_interval());
   ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %dms", this->response_timeout);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Use Fahrenheit: %d", this->use_fahrenheit_);
@@ -665,6 +1035,10 @@ void AirConditioner::dump_config() {
 /* ACTIONS */
 
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
+  if (this->vrf_protocol_) {
+    ESP_LOGW(Constants::TAG, "Follow-Me is not implemented for VRF protocol.");
+    return;
+  }
 #ifdef USE_REMOTE_TRANSMITTER
   ESP_LOGI(Constants::TAG, "Setting Follow-Me temperature to %.1f with beeper %d and remote transmitter", temperature, beeper);
   IrFollowMeData data(static_cast<uint8_t>(lroundf(temperature)), beeper);
@@ -699,6 +1073,11 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
 }
 
 void AirConditioner::set_static_pressure(uint8_t static_pressure) {
+  if (this->vrf_protocol_) {
+    ESP_LOGW(Constants::TAG, "Static pressure control is not implemented for VRF protocol.");
+    return;
+  }
+
   if (static_pressure > 15) {
     ESP_LOGW(Constants::TAG, "Cannot set static pressure %d > 15", static_pressure);
     return;
@@ -723,6 +1102,10 @@ void AirConditioner::set_static_pressure(uint8_t static_pressure) {
 }
 
 void AirConditioner::do_swing_step() {
+  if (this->vrf_protocol_) {
+    ESP_LOGW(Constants::TAG, "Swing step is not implemented for VRF protocol.");
+    return;
+  }
 #ifdef USE_REMOTE_TRANSMITTER
   IrSpecialData data(0x01);
   this->transmitter_.transmit(data);

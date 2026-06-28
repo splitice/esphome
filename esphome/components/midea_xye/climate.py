@@ -65,6 +65,7 @@ CONF_FAN_SPEED = "fan_speed"
 CONF_POWER_USAGE = "power_usage"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_STATIC_PRESSURE = "static_pressure"
+CONF_PROTOCOL = "protocol"
 midea_ac_ns = cg.esphome_ns.namespace("midea").namespace("ac")
 AirConditioner = midea_ac_ns.class_("AirConditioner", climate.Climate, cg.Component)
 StaticPressureNumber = midea_ac_ns.class_("StaticPressureNumber", number.Number, cg.Component)
@@ -125,11 +126,17 @@ CUSTOM_PRESETS = {
     "FREEZE_PROTECTION": Capabilities.FREEZE_PROTECTION,
 }
 
+PROTOCOLS = {
+    "xye": False,
+    "vrf": True,
+}
+
 validate_modes = cv.enum(ALLOWED_CLIMATE_MODES, upper=True)
 validate_presets = cv.enum(ALLOWED_CLIMATE_PRESETS, upper=True)
 validate_swing_modes = cv.enum(ALLOWED_CLIMATE_SWING_MODES, upper=True)
 validate_custom_fan_modes = cv.enum(CUSTOM_FAN_MODES, upper=True)
 validate_custom_presets = cv.enum(CUSTOM_PRESETS, upper=True)
+validate_protocol = cv.enum(PROTOCOLS, lower=True)
 
 CONFIG_SCHEMA = cv.All(
     climate.climate_schema(AirConditioner).extend(
@@ -137,6 +144,7 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(AirConditioner),
             cv.Optional(CONF_PERIOD, default="1s"): cv.time_period,
             cv.Optional(CONF_TIMEOUT, default="100ms"): cv.time_period,
+            cv.Optional(CONF_PROTOCOL, default="xye"): validate_protocol,
             cv.Optional(CONF_USE_FAHRENHEIT, default=False): cv.boolean,
             cv.OnlyWith(CONF_TRANSMITTER_ID, "remote_transmitter"): cv.use_id(
                 remote_transmitter.RemoteTransmitterComponent
@@ -362,6 +370,7 @@ async def to_code(config):
     await climate.register_climate(var, config)
     cg.add(var.set_period(config[CONF_PERIOD].total_milliseconds))
     cg.add(var.set_response_timeout(config[CONF_TIMEOUT].total_milliseconds))
+    cg.add(var.set_vrf_protocol(config[CONF_PROTOCOL]))
     cg.add(var.set_use_fahrenheit(config[CONF_USE_FAHRENHEIT]))
     if CONF_TRANSMITTER_ID in config:
         cg.add_define("USE_REMOTE_TRANSMITTER")

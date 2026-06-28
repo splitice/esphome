@@ -142,6 +142,15 @@
 #define SERVER_ID 0
 #define CLIENT_ID 0
 
+// Experimental D1D2/VRF command structure
+#define VRF_COMMAND_STATUS 0x23
+#define VRF_FRAME_END_2 0xFE
+#define VRF_POLL_REQUEST 0x65
+#define VRF_PAYLOAD_MAX_LEN 7
+#define VRF_FRAME_MAX_LEN (11 + VRF_PAYLOAD_MAX_LEN)
+#define VRF_RX_MAX_LEN 64
+#define VRF_QUEUE_LEN 4
+
 namespace esphome {
 namespace midea {
 namespace ac {
@@ -198,6 +207,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void set_humidity_setpoint_sensor(Sensor *sensor) { this->humidity_sensor_ = sensor; }
   void set_power_sensor(Sensor *sensor) { this->power_sensor_ = sensor; }
   void set_use_fahrenheit(bool yesno) { this->use_fahrenheit_ = yesno; }
+  void set_vrf_protocol(bool yesno) { this->vrf_protocol_ = yesno; }
 #ifdef USE_SWITCH
   void set_use_fahrenheit_switch(switch_::Switch *sw) { this->use_fahrenheit_switch_ = sw; }
 #endif
@@ -236,12 +246,24 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   uint8_t RXData[RX_LEN];
 
  private:
+  struct VrfPayload {
+    uint8_t len{0};
+    uint8_t data[VRF_PAYLOAD_MAX_LEN]{};
+  };
+
   uint8_t controlState;
   uint8_t ForceReadNextCycle;
   uint8_t queuedCommand;
   uint32_t response_timeout;
   bool followMeInit;
   uint8_t lastFollowMeTemperature;
+  bool vrf_protocol_{false};
+  bool vrf_waiting_response_{false};
+  uint8_t vrf_last_mode_nibble_{0x02};
+  VrfPayload vrf_queue_[VRF_QUEUE_LEN];
+  uint8_t vrf_queue_head_{0};
+  uint8_t vrf_queue_tail_{0};
+  uint8_t vrf_queue_count_{0};
 
  protected:
   uart::UARTComponent *uart_;
@@ -280,10 +302,22 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   ClimateMode last_on_mode_;
 
   static uint8_t CalculateCRC(uint8_t *Data, uint8_t len);
+  static uint16_t CalculateVrfCRC(const uint8_t *data, uint8_t len);
   void ParseResponse(uint8_t cmdSent);
+  void control_vrf(const ClimateCall &call);
+  void update_vrf();
+  bool queue_vrf_payload(const uint8_t *payload, uint8_t len);
+  bool queue_vrf_mode_command(ClimateMode mode);
+  bool queue_vrf_temperature_command(float target_temperature);
+  void send_vrf_payload(const uint8_t *payload, uint8_t len);
+  void parse_vrf_response(const uint8_t *frame, uint8_t len);
   uint8_t CalculateSetTime(uint32_t time);
   uint32_t CalculateGetTime(uint8_t time);
   static float CalculateTemp(uint8_t byte);
+  static uint8_t EncodeVrfTemp(float celsius);
+  static float DecodeVrfTemp(uint8_t byte);
+  static bool EncodeVrfMode(ClimateMode mode, uint8_t &nibble);
+  static bool DecodeVrfMode(uint8_t nibble, ClimateMode &mode);
   uint8_t adjust_target_temperature(float target_temperature) const;
   float read_target_temperature(uint8_t target_temperature, bool fahrenheit_encoded) const;
 };
