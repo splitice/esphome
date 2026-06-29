@@ -282,7 +282,7 @@ which field to change.
 
 | User action | Payload shape | Meaning |
 | --- | --- | --- |
-| Power / mode | `01 00 VALUE` | `VALUE = power_nibble | mode_nibble` |
+| Mode, including off | `01 00 VALUE` | `VALUE = power_nibble | mode_nibble` |
 | Fan | `01 01 VALUE` | `VALUE = 80` for auto, otherwise `01` to `07` |
 | Temperature | `01 03 T 04 T 02 T` | Writes cooling, heating, and active setpoint fields |
 | Swing | `01 09 S 0D 0F` | `S = horizontal << 4 | vertical` |
@@ -292,9 +292,10 @@ payload used by the sketch.
 
 ## D1D2 Command Semantics
 
-### D1D2 Power and Mode
+### D1D2 Mode and Power Bit
 
-Power and mode are packed into one payload value:
+At the Home Assistant / MQTT layer, the sketch treats `off` as a mode. On the
+wire, the same mode command carries a packed power bit and mode nibble:
 
 ```text
 payload = 01 00 VALUE
@@ -317,8 +318,9 @@ Mode nibble:
 | Heat | `03` |
 | Dry | `06` |
 
-Turning off retains the last active mode nibble. For example, if the last mode
-was cool, off is sent as:
+Turning off is still a mode command, but it clears the power nibble and retains
+the last active mode nibble. For example, if the last active mode was cool, off
+is sent as:
 
 ```text
 01 00 02
@@ -346,6 +348,10 @@ payload = 01 01 VALUE
 The numeric values overlap partly with the local XYE fan bytes, but the meaning
 is not identical. Local XYE only exposes low/medium/high, while the D1D2 sketch
 exposes seven discrete fixed levels.
+
+The experimental ESPHome VRF mode exposes this as standard fan mode `AUTO` plus
+custom fan modes `Level 1` through `Level 7`. The custom modes encode directly
+as `01` through `07`.
 
 ### D1D2 Temperature
 
@@ -401,7 +407,7 @@ Examples:
 
 ## Command-by-Command Comparison
 
-### Power and Mode
+### Mode and Power Bit
 
 Local XYE:
 
@@ -423,6 +429,10 @@ D1D2:
 ```text
 23 payload = 01 00 (power_nibble | mode_nibble)
 ```
+
+In the sketch's MQTT/Home Assistant API, `off` is represented as a climate mode.
+The protocol payload represents that off mode by clearing the power nibble while
+retaining the previous active mode nibble.
 
 | State | D1D2 value |
 | --- | --- |
@@ -613,7 +623,8 @@ To make the local component speak the D1D2 VRF protocol, the main work would be:
    Modbus CRC16, and `55 FE` termination.
 2. Replace local `C3` complete-state writes with `23` field-update payloads.
 3. Replace local temperature encoding with the D1D2 half-degree offset encoding.
-4. Model power and mode as a packed power/mode byte.
+4. Model `off` as a climate mode whose protocol byte clears the packed power bit
+   while retaining the last active mode nibble.
 5. Expand fan support from low/medium/high to fixed levels `1` through `7`.
 6. Add horizontal and positional vertical swing support if desired.
 7. Decide whether local XYE should append a post-frame `FE` for better

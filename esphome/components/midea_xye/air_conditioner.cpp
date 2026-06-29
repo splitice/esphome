@@ -14,6 +14,9 @@ const char *const Constants::FREEZE_PROTECTION = "Freeze Protection";
 const char *const Constants::SILENT = "Silent";
 const char *const Constants::TURBO = "Turbo";
 
+static const char *const VRF_FAN_LEVELS[] = {
+    "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7"};
+
 static void set_sensor(Sensor *sensor, float value) {
   if (sensor != nullptr && (!sensor->has_state() || sensor->get_raw_state() != value))
     sensor->publish_state(value);
@@ -194,11 +197,14 @@ void AirConditioner::control_vrf(const ClimateCall &call) {
   if (call.get_mode().has_value()) {
     need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
   }
+  if (call.get_fan_mode().has_value()) {
+    need_publish |= this->queue_vrf_fan_command(call.get_fan_mode().value());
+  }
+  if (call.has_custom_fan_mode()) {
+    need_publish |= this->queue_vrf_custom_fan_command(call.get_custom_fan_mode());
+  }
   if (call.get_target_temperature().has_value()) {
     need_publish |= this->queue_vrf_temperature_command(call.get_target_temperature().value());
-  }
-  if (call.get_fan_mode().has_value()) {
-    ESP_LOGW(Constants::TAG, "VRF fan control is not implemented; ignoring fan mode command.");
   }
   if (call.get_swing_mode().has_value()) {
     ESP_LOGW(Constants::TAG, "VRF swing control is not implemented; ignoring swing mode command.");
@@ -234,6 +240,8 @@ bool AirConditioner::queue_vrf_mode_command(ClimateMode mode) {
   uint8_t value = 0;
 
   if (mode == ClimateMode::CLIMATE_MODE_OFF) {
+    // The reference sketch models OFF as a climate mode, but the protocol byte
+    // still clears only the power nibble and retains the last active mode nibble.
     value = this->vrf_last_mode_nibble_;
   } else {
     uint8_t mode_nibble = 0;
@@ -270,6 +278,38 @@ bool AirConditioner::queue_vrf_temperature_command(float target_temperature) {
   }
 
   this->target_temperature = DecodeVrfTemp(encoded);
+  return true;
+}
+
+bool AirConditioner::queue_vrf_fan_command(ClimateFanMode fan_mode) {
+  uint8_t value = 0;
+  if (!EncodeVrfFanMode(fan_mode, value)) {
+    ESP_LOGW(Constants::TAG, "VRF fan mode %d is not supported", fan_mode);
+    return false;
+  }
+
+  const uint8_t payload[] = {0x01, 0x01, value};
+  if (!this->queue_vrf_payload(payload, sizeof(payload))) {
+    return false;
+  }
+
+  this->set_fan_mode_(fan_mode);
+  return true;
+}
+
+bool AirConditioner::queue_vrf_custom_fan_command(StringRef custom_fan_mode) {
+  uint8_t value = 0;
+  if (!EncodeVrfCustomFanMode(custom_fan_mode, value)) {
+    ESP_LOGW(Constants::TAG, "VRF custom fan mode %s is not supported", custom_fan_mode.c_str());
+    return false;
+  }
+
+  const uint8_t payload[] = {0x01, 0x01, value};
+  if (!this->queue_vrf_payload(payload, sizeof(payload))) {
+    return false;
+  }
+
+  this->set_custom_fan_mode_(custom_fan_mode);
   return true;
 }
 
@@ -663,6 +703,14 @@ void AirConditioner::parse_vrf_response(const uint8_t *frame, uint8_t len) {
   }
 
   update_property(this->target_temperature, DecodeVrfTemp(frame[10]), need_publish);
+  ClimateFanMode decoded_fan_mode;
+  if (DecodeVrfFanMode(frame[9], decoded_fan_mode)) {
+    need_publish |= this->set_fan_mode_(decoded_fan_mode);
+  } else if (const char *custom_fan_mode = nullptr; DecodeVrfCustomFanMode(frame[9], custom_fan_mode)) {
+    need_publish |= this->set_custom_fan_mode_(custom_fan_mode);
+  } else {
+    ESP_LOGD(Constants::TAG, "Received unknown VRF fan value %02X", frame[9]);
+  }
   ESP_LOGD(Constants::TAG, "VRF status pwr/mode=%02X fan=%02X setpoint=%.1f swing=%02X", pwr_mode, frame[9],
            DecodeVrfTemp(frame[10]), frame[17]);
 
@@ -1022,12 +1070,49 @@ bool AirConditioner::DecodeVrfMode(uint8_t nibble, ClimateMode &mode) {
   }
 }
 
+bool AirConditioner::EncodeVrfFanMode(ClimateFanMode fan_mode, uint8_t &value) {
+  switch (fan_mode) {
+    case ClimateFanMode::CLIMATE_FAN_AUTO:
+      value = 0x80;
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool AirConditioner::DecodeVrfFanMode(uint8_t value, ClimateFanMode &fan_mode) {
+  if (value == 0x80) {
+    fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
+    return true;
+  }
+  return false;
+}
+
+bool AirConditioner::EncodeVrfCustomFanMode(StringRef custom_fan_mode, uint8_t &value) {
+  for (uint8_t i = 0; i < sizeof(VRF_FAN_LEVELS) / sizeof(VRF_FAN_LEVELS[0]); i++) {
+    if (custom_fan_mode == VRF_FAN_LEVELS[i]) {
+      value = i + 1;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool AirConditioner::DecodeVrfCustomFanMode(uint8_t value, const char *&custom_fan_mode) {
+  if (value < 0x01 || value > 0x07) {
+    return false;
+  }
+  custom_fan_mode = VRF_FAN_LEVELS[value - 1];
+  return true;
+}
+
 climate::ClimateTraits AirConditioner::traits() {
   auto traits = climate::ClimateTraits();
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   traits.set_visual_min_temperature(17);
   traits.set_visual_max_temperature(30);
   traits.set_visual_temperature_step(this->use_vrf_commands_() ? 0.5 : 1.0);
+  traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_AUTO);
 
   if (this->use_vrf_commands_()) {
     auto supported_modes = this->supported_modes_;
@@ -1037,6 +1122,7 @@ climate::ClimateTraits AirConditioner::traits() {
                               ClimateMode::CLIMATE_MODE_DRY, ClimateMode::CLIMATE_MODE_FAN_ONLY});
     }
     traits.set_supported_modes(supported_modes);
+    traits.set_supported_custom_fan_modes(VRF_FAN_LEVELS);
     if (!traits.get_supported_modes().empty())
       traits.add_supported_mode(ClimateMode::CLIMATE_MODE_OFF);
     return traits;
@@ -1048,8 +1134,6 @@ climate::ClimateTraits AirConditioner::traits() {
   traits.set_supported_presets(this->supported_presets_);
   traits.set_supported_custom_presets(this->supported_custom_presets_);
   traits.set_supported_custom_fan_modes(this->supported_custom_fan_modes_);
-  /* + MINIMAL SET OF CAPABILITIES */
-  traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_AUTO);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_LOW);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_MEDIUM);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_HIGH);

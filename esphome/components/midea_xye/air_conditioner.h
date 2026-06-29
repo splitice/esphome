@@ -339,6 +339,8 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void update_vrf();
   bool queue_vrf_payload(const uint8_t *payload, uint8_t len);
   bool queue_vrf_mode_command(ClimateMode mode);
+  bool queue_vrf_fan_command(ClimateFanMode fan_mode);
+  bool queue_vrf_custom_fan_command(StringRef custom_fan_mode);
   bool queue_vrf_temperature_command(float target_temperature);
   void send_vrf_payload(const uint8_t *payload, uint8_t len);
   void parse_vrf_response(const uint8_t *frame, uint8_t len);
@@ -349,6 +351,10 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   static float DecodeVrfTemp(uint8_t byte);
   static bool EncodeVrfMode(ClimateMode mode, uint8_t &nibble);
   static bool DecodeVrfMode(uint8_t nibble, ClimateMode &mode);
+  static bool EncodeVrfFanMode(ClimateFanMode fan_mode, uint8_t &value);
+  static bool DecodeVrfFanMode(uint8_t value, ClimateFanMode &fan_mode);
+  static bool EncodeVrfCustomFanMode(StringRef custom_fan_mode, uint8_t &value);
+  static bool DecodeVrfCustomFanMode(uint8_t value, const char *&custom_fan_mode);
   uint8_t adjust_target_temperature(float target_temperature) const;
   float read_target_temperature(uint8_t target_temperature, bool fahrenheit_encoded) const;
 };
