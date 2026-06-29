@@ -275,6 +275,12 @@ For target unit `01`, sender `0064`, the transmitted frame is:
 AA 23 01 00 64 00 01 65 D6 98 55 FE
 ```
 
+The experimental ESPHome VRF mode does not currently use this `65` poll for
+periodic status. It uses VRF `23` frames for queued control writes, then falls
+back to the existing XYE `C0`/`C4` query frames for status polling so current
+temperature and the existing auxiliary temperature sensors can still be
+populated. In that hybrid mode, the XYE `C3` and `C6` write frames are skipped.
+
 ### D1D2 Field-Update Payloads
 
 All control writes in the sketch use command byte `23`; the payload identifies

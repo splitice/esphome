@@ -415,7 +415,9 @@ void AirConditioner::setACParams() {
   }
   // set fan mode
   if (this->mode != ClimateMode::CLIMATE_MODE_HEAT_COOL) {
-    switch (this->fan_mode.value()) {
+    ClimateFanMode fan_mode =
+        this->fan_mode.has_value() ? this->fan_mode.value() : ClimateFanMode::CLIMATE_FAN_AUTO;
+    switch (fan_mode) {
       case ClimateFanMode::CLIMATE_FAN_AUTO:
         TXData[7] = FAN_MODE_AUTO;
         break;
@@ -482,10 +484,13 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
       if (cmdSent != 0xC3) {
         ParseResponse(cmdSent);
       }
-      if (queuedCommand != 0) {
+      if (queuedCommand != 0 && !this->use_vrf_commands_()) {
         controlState = queuedCommand;
         queuedCommand = 0;
       } else {
+        if (this->use_vrf_commands_()) {
+          queuedCommand = 0;
+        }
         switch (cmdSent) {
           case 0xC0:
             controlState = STATE_SEND_C4;
@@ -494,7 +499,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
             controlState = STATE_SEND_C6;
             break;
           case 0xC4:
-            controlState = STATE_SEND_C3;
+            controlState = this->use_vrf_commands_() ? STATE_SEND_C0 : STATE_SEND_C3;
             break;
           case 0xC6:
             controlState = STATE_SEND_C0;
@@ -511,10 +516,18 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
 
 void AirConditioner::update() {
   if (this->use_vrf_commands_()) {
-    this->update_vrf();
+    if (this->vrf_waiting_response_ || this->vrf_queue_count_ > 0) {
+      this->update_vrf();
+      return;
+    }
+    this->update_xye(false);
     return;
   }
 
+  this->update_xye(true);
+}
+
+void AirConditioner::update_xye(bool allow_control_commands) {
   uint8_t cmdSent = 0x00;
   // Possible States:
   // 0: Waiting for Response from Command
@@ -524,6 +537,10 @@ void AirConditioner::update() {
   // 4: Sending Query C4 Command
   switch (controlState) {
     case STATE_SEND_C3: {
+      if (!allow_control_commands) {
+        controlState = STATE_SEND_C0;
+        break;
+      }
       // construct set command (includes preparing the data)
       setACParams();
       cmdSent = CLIENT_COMMAND_SET;
@@ -531,6 +548,10 @@ void AirConditioner::update() {
       break;
     }
     case STATE_SEND_C6: {
+      if (!allow_control_commands) {
+        controlState = STATE_SEND_C0;
+        break;
+      }
       // If the AC mode changed, follow-me should be
       // refreshed, if emulating the wired controller's
       // behavior.
@@ -577,7 +598,7 @@ void AirConditioner::update() {
       break;
     }
     default: {
-      controlState = STATE_SEND_C3;
+      controlState = allow_control_commands ? STATE_SEND_C3 : STATE_SEND_C0;
     }
   }
 }
@@ -595,8 +616,7 @@ void AirConditioner::update_vrf() {
     return;
   }
 
-  const uint8_t payload[] = {VRF_POLL_REQUEST};
-  this->send_vrf_payload(payload, sizeof(payload));
+  // VRF command mode uses the richer XYE query frames for periodic status.
 }
 
 void AirConditioner::send_vrf_payload(const uint8_t *payload, uint8_t len) {
@@ -1160,6 +1180,7 @@ climate::ClimateTraits AirConditioner::traits() {
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_AUTO);
 
   if (this->use_vrf_commands_()) {
+    traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
     auto supported_modes = this->supported_modes_;
     supported_modes.erase(ClimateMode::CLIMATE_MODE_HEAT_COOL);
     if (supported_modes.empty()) {
