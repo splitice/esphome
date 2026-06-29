@@ -344,7 +344,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
 #endif
   void ParseResponse(uint8_t cmdSent);
   void control_vrf(const ClimateCall &call);
-  void update_xye(bool allow_control_commands);
+  void update_xye(bool c0_only);
   void update_vrf();
   bool queue_vrf_payload(const uint8_t *payload, uint8_t len);
   bool queue_vrf_mode_command(ClimateMode mode);

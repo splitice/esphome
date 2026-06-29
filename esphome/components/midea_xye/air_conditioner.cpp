@@ -493,7 +493,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
         }
         switch (cmdSent) {
           case 0xC0:
-            controlState = STATE_SEND_C4;
+            controlState = this->use_vrf_commands_() ? STATE_SEND_C0 : STATE_SEND_C4;
             break;
           case 0xC3:
             controlState = STATE_SEND_C6;
@@ -520,14 +520,14 @@ void AirConditioner::update() {
       this->update_vrf();
       return;
     }
-    this->update_xye(false);
+    this->update_xye(true);
     return;
   }
 
-  this->update_xye(true);
+  this->update_xye(false);
 }
 
-void AirConditioner::update_xye(bool allow_control_commands) {
+void AirConditioner::update_xye(bool c0_only) {
   uint8_t cmdSent = 0x00;
   // Possible States:
   // 0: Waiting for Response from Command
@@ -537,7 +537,7 @@ void AirConditioner::update_xye(bool allow_control_commands) {
   // 4: Sending Query C4 Command
   switch (controlState) {
     case STATE_SEND_C3: {
-      if (!allow_control_commands) {
+      if (c0_only) {
         controlState = STATE_SEND_C0;
         break;
       }
@@ -548,7 +548,7 @@ void AirConditioner::update_xye(bool allow_control_commands) {
       break;
     }
     case STATE_SEND_C6: {
-      if (!allow_control_commands) {
+      if (c0_only) {
         controlState = STATE_SEND_C0;
         break;
       }
@@ -583,6 +583,10 @@ void AirConditioner::update_xye(bool allow_control_commands) {
       break;
     }
     case STATE_SEND_C4: {
+      if (c0_only) {
+        controlState = STATE_SEND_C0;
+        break;
+      }
       // extended query
       setACParams();
       
@@ -598,7 +602,7 @@ void AirConditioner::update_xye(bool allow_control_commands) {
       break;
     }
     default: {
-      controlState = allow_control_commands ? STATE_SEND_C3 : STATE_SEND_C0;
+      controlState = c0_only ? STATE_SEND_C0 : STATE_SEND_C3;
     }
   }
 }
@@ -616,7 +620,7 @@ void AirConditioner::update_vrf() {
     return;
   }
 
-  // VRF command mode uses the richer XYE query frames for periodic status.
+  // VRF command mode uses the richer XYE C0 query frame for periodic status.
 }
 
 void AirConditioner::send_vrf_payload(const uint8_t *payload, uint8_t len) {
