@@ -21,6 +21,7 @@ from esphome.const import (
     CONF_MIN_VALUE,
     CONF_ICON,
     CONF_MODE,
+    CONF_PROTOCOL,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
@@ -65,7 +66,6 @@ CONF_FAN_SPEED = "fan_speed"
 CONF_POWER_USAGE = "power_usage"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_STATIC_PRESSURE = "static_pressure"
-CONF_PROTOCOL = "protocol"
 midea_ac_ns = cg.esphome_ns.namespace("midea").namespace("ac")
 AirConditioner = midea_ac_ns.class_("AirConditioner", climate.Climate, cg.Component)
 StaticPressureNumber = midea_ac_ns.class_("StaticPressureNumber", number.Number, cg.Component)
@@ -136,7 +136,11 @@ validate_presets = cv.enum(ALLOWED_CLIMATE_PRESETS, upper=True)
 validate_swing_modes = cv.enum(ALLOWED_CLIMATE_SWING_MODES, upper=True)
 validate_custom_fan_modes = cv.enum(CUSTOM_FAN_MODES, upper=True)
 validate_custom_presets = cv.enum(CUSTOM_PRESETS, upper=True)
-validate_protocol = cv.enum(PROTOCOLS, lower=True)
+validate_protocol_name = cv.one_of(*PROTOCOLS, lower=True)
+
+
+def validate_protocol(value):
+    return PROTOCOLS[validate_protocol_name(value)]
 
 CONFIG_SCHEMA = cv.All(
     climate.climate_schema(AirConditioner).extend(
