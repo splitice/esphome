@@ -223,17 +223,24 @@ void AirConditioner::setPowerState(bool state) {
 
 void AirConditioner::control_vrf(const ClimateCall &call) {
   bool need_publish = false;
+  ESP_LOGD(Constants::TAG, "VRF control call received");
 
   if (call.get_mode().has_value()) {
+    ESP_LOGD(Constants::TAG, "  Mode command: %s",
+             LOG_STR_ARG(climate::climate_mode_to_string(call.get_mode().value())));
     need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
   }
   if (call.get_fan_mode().has_value()) {
+    ESP_LOGD(Constants::TAG, "  Fan command: %s",
+             LOG_STR_ARG(climate::climate_fan_mode_to_string(call.get_fan_mode().value())));
     need_publish |= this->queue_vrf_fan_command(call.get_fan_mode().value());
   }
   if (call.has_custom_fan_mode()) {
+    ESP_LOGD(Constants::TAG, "  Custom fan command: %s", call.get_custom_fan_mode().c_str());
     need_publish |= this->queue_vrf_custom_fan_command(call.get_custom_fan_mode());
   }
   if (call.get_target_temperature().has_value()) {
+    ESP_LOGD(Constants::TAG, "  Target temperature command: %.1f", call.get_target_temperature().value());
     need_publish |= this->queue_vrf_temperature_command(call.get_target_temperature().value());
   }
   if (call.get_swing_mode().has_value()) {
@@ -250,8 +257,15 @@ void AirConditioner::control_vrf(const ClimateCall &call) {
 }
 
 void AirConditioner::send_queued_vrf_payload_if_idle_() {
-  if (!this->use_vrf_commands_() || this->vrf_waiting_response_ || this->vrf_queue_count_ == 0 ||
-      this->controlState == STATE_WAIT_DATA) {
+  if (!this->use_vrf_commands_() || this->vrf_queue_count_ == 0) {
+    return;
+  }
+  if (this->vrf_waiting_response_) {
+    ESP_LOGD(Constants::TAG, "VRF queue depth %d pending; waiting for VRF response", this->vrf_queue_count_);
+    return;
+  }
+  if (this->controlState == STATE_WAIT_DATA) {
+    ESP_LOGD(Constants::TAG, "VRF queue depth %d pending; waiting for C0 response", this->vrf_queue_count_);
     return;
   }
   this->update_vrf();
@@ -815,6 +829,19 @@ void AirConditioner::ParseResponse(uint8_t cmdSent) {
       (RXData[RX_BYTE_TO_CLIENT] == TO_CLIENT) && (RXData[RX_BYTE_CRC] == CalculateCRC(RXData, RX_LEN))) {
     switch (RXData[RX_BYTE_COMMAND_TYPE]) {
       case CLIENT_COMMAND_QUERY: {
+        if (this->use_vrf_commands_()) {
+          bool need_publish = false;
+          update_property(this->current_temperature, CalculateTemp(RXData[RX_C0_BYTE_T1_TEMP]), need_publish);
+          if (need_publish) {
+            this->publish_state();
+          }
+
+          set_sensor(this->temperature_2a_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T2A_TEMP]));
+          set_sensor(this->temperature_2b_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T2B_TEMP]));
+          set_sensor(this->temperature_3_sensor_, CalculateTemp(RXData[RX_C0_BYTE_T3_TEMP]));
+          break;
+        }
+
         ClimateMode mode = ClimateMode::CLIMATE_MODE_OFF;
         ClimateFanMode fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
         ClimatePreset preset = ClimatePreset::CLIMATE_PRESET_NONE;

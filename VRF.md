@@ -278,8 +278,10 @@ AA 23 01 00 64 00 01 65 D6 98 55 FE
 The experimental ESPHome VRF mode does not currently use this `65` poll for
 periodic status. It uses VRF `23` frames for queued control writes, then falls
 back to the existing XYE `C0` query frame for status polling so current
-temperature and the C0-backed auxiliary values can still be populated. In that
-hybrid mode, the XYE `C3`, `C4`, and `C6` frames are skipped.
+temperature and the C0-backed auxiliary temperature values can still be
+populated. In that hybrid mode, C0 is treated as temperature readback only; mode,
+setpoint, fan, swing, and preset remain owned by the VRF command/status path.
+The XYE `C3`, `C4`, and `C6` frames are skipped.
 
 ### D1D2 Field-Update Payloads
 
