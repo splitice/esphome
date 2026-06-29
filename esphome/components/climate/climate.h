@@ -218,6 +218,36 @@ class Climate : public EntityBase {
    */
   ClimateTraits get_traits();
 
+  void set_supported_custom_fan_modes(std::initializer_list<const char *> modes) {
+    this->supported_custom_fan_modes_ = modes;
+    this->supported_custom_fan_modes_override_ = true;
+  }
+  void set_supported_custom_fan_modes(const std::vector<const char *> &modes) {
+    this->supported_custom_fan_modes_ = modes;
+    this->supported_custom_fan_modes_override_ = true;
+  }
+  template<size_t N> void set_supported_custom_fan_modes(const char *const (&modes)[N]) {
+    this->supported_custom_fan_modes_.assign(modes, modes + N);
+    this->supported_custom_fan_modes_override_ = true;
+  }
+  void set_supported_custom_fan_modes(const std::vector<std::string> &modes) = delete;
+  void set_supported_custom_fan_modes(std::initializer_list<std::string> modes) = delete;
+
+  void set_supported_custom_presets(std::initializer_list<const char *> presets) {
+    this->supported_custom_presets_ = presets;
+    this->supported_custom_presets_override_ = true;
+  }
+  void set_supported_custom_presets(const std::vector<const char *> &presets) {
+    this->supported_custom_presets_ = presets;
+    this->supported_custom_presets_override_ = true;
+  }
+  template<size_t N> void set_supported_custom_presets(const char *const (&presets)[N]) {
+    this->supported_custom_presets_.assign(presets, presets + N);
+    this->supported_custom_presets_override_ = true;
+  }
+  void set_supported_custom_presets(const std::vector<std::string> &presets) = delete;
+  void set_supported_custom_presets(std::initializer_list<std::string> presets) = delete;
+
 #ifdef USE_CLIMATE_VISUAL_OVERRIDES
   void set_visual_min_temperature_override(float visual_min_temperature_override);
   void set_visual_max_temperature_override(float visual_max_temperature_override);
@@ -334,6 +364,10 @@ class Climate : public EntityBase {
   LazyCallbackManager<void(Climate &)> state_callback_{};
   LazyCallbackManager<void(ClimateCall &)> control_callback_{};
   ESPPreferenceObject rtc_;
+  std::vector<const char *> supported_custom_fan_modes_{};
+  std::vector<const char *> supported_custom_presets_{};
+  bool supported_custom_fan_modes_override_{false};
+  bool supported_custom_presets_override_{false};
 #ifdef USE_CLIMATE_VISUAL_OVERRIDES
   float visual_min_temperature_override_{NAN};
   float visual_max_temperature_override_{NAN};

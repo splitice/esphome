@@ -107,6 +107,7 @@ void AirConditioner::setup() {
   this->vrf_queue_head_ = 0;
   this->vrf_queue_tail_ = 0;
   this->vrf_queue_count_ = 0;
+  this->refresh_supported_custom_modes_();
 
   // Start up in Auto fan mode (since unit doesn't report it correctly)
   this->fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
@@ -148,10 +149,38 @@ void AirConditioner::set_constant_fan(bool yesno) {
   this->vrf_queue_count_ = 0;
   this->controlState = STATE_SEND_C0;
   this->queuedCommand = 0;
+  bool climate_state_changed = this->refresh_supported_custom_modes_();
   ESP_LOGI(Constants::TAG, "Constant fan %s; using %s command mode.", ONOFF(enabled), enabled ? "VRF" : "XYE");
+  if (climate_state_changed) {
+    this->publish_state();
+  }
 #ifdef USE_SWITCH
   this->publish_constant_fan_switch_();
 #endif
+}
+
+bool AirConditioner::refresh_supported_custom_modes_() {
+  if (this->use_vrf_commands_()) {
+    this->set_supported_custom_fan_modes(VRF_FAN_LEVELS);
+    this->set_supported_custom_presets(std::vector<const char *>{});
+  } else {
+    this->set_supported_custom_fan_modes(this->supported_custom_fan_modes_);
+    this->set_supported_custom_presets(this->supported_custom_presets_);
+  }
+
+  auto traits = this->get_traits();
+  bool changed = false;
+  if (this->has_custom_fan_mode() && !traits.supports_custom_fan_mode(this->get_custom_fan_mode().c_str())) {
+    ClimateFanMode mapped_fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
+    // Preserve the nearest XYE speed when leaving VRF Level 1-7 fan control.
+    MapVrfCustomFanModeToXyeFanMode(this->get_custom_fan_mode(), mapped_fan_mode);
+    changed |= this->set_fan_mode_(mapped_fan_mode);
+  }
+  if (this->has_custom_preset() && !traits.supports_custom_preset(this->get_custom_preset().c_str())) {
+    this->clear_custom_preset_();
+    changed = true;
+  }
+  return changed;
 }
 
 #ifdef USE_SWITCH
@@ -1106,6 +1135,22 @@ bool AirConditioner::DecodeVrfCustomFanMode(uint8_t value, const char *&custom_f
   return true;
 }
 
+bool AirConditioner::MapVrfCustomFanModeToXyeFanMode(StringRef custom_fan_mode, ClimateFanMode &fan_mode) {
+  uint8_t value = 0;
+  if (!EncodeVrfCustomFanMode(custom_fan_mode, value)) {
+    return false;
+  }
+
+  if (value <= 0x02) {
+    fan_mode = ClimateFanMode::CLIMATE_FAN_LOW;
+  } else if (value <= 0x05) {
+    fan_mode = ClimateFanMode::CLIMATE_FAN_MEDIUM;
+  } else {
+    fan_mode = ClimateFanMode::CLIMATE_FAN_HIGH;
+  }
+  return true;
+}
+
 climate::ClimateTraits AirConditioner::traits() {
   auto traits = climate::ClimateTraits();
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
@@ -1122,7 +1167,6 @@ climate::ClimateTraits AirConditioner::traits() {
                               ClimateMode::CLIMATE_MODE_DRY, ClimateMode::CLIMATE_MODE_FAN_ONLY});
     }
     traits.set_supported_modes(supported_modes);
-    traits.set_supported_custom_fan_modes(VRF_FAN_LEVELS);
     if (!traits.get_supported_modes().empty())
       traits.add_supported_mode(ClimateMode::CLIMATE_MODE_OFF);
     return traits;
@@ -1132,8 +1176,6 @@ climate::ClimateTraits AirConditioner::traits() {
   traits.set_supported_modes(this->supported_modes_);
   traits.set_supported_swing_modes(this->supported_swing_modes_);
   traits.set_supported_presets(this->supported_presets_);
-  traits.set_supported_custom_presets(this->supported_custom_presets_);
-  traits.set_supported_custom_fan_modes(this->supported_custom_fan_modes_);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_LOW);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_MEDIUM);
   traits.add_supported_fan_mode(ClimateFanMode::CLIMATE_FAN_HIGH);

@@ -485,6 +485,12 @@ void Climate::publish_state() {
 
 ClimateTraits Climate::get_traits() {
   auto traits = this->traits();
+  if (this->supported_custom_fan_modes_override_) {
+    traits.supported_custom_fan_modes_ = this->supported_custom_fan_modes_;
+  }
+  if (this->supported_custom_presets_override_) {
+    traits.supported_custom_presets_ = this->supported_custom_presets_;
+  }
 #ifdef USE_CLIMATE_VISUAL_OVERRIDES
   if (!std::isnan(this->visual_min_temperature_override_)) {
     traits.set_visual_min_temperature(this->visual_min_temperature_override_);

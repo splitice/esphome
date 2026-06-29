@@ -219,6 +219,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void set_protocol(Protocol protocol) {
     this->protocol_ = protocol;
     this->constant_fan_ = protocol == PROTOCOL_VRF;
+    this->refresh_supported_custom_modes_();
 #ifdef USE_TEXT_SENSOR
     this->publish_configured_protocol_();
 #endif
@@ -258,8 +259,14 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void set_supported_modes(climate::ClimateModeMask modes) { this->supported_modes_ = modes; }
   void set_supported_swing_modes(climate::ClimateSwingModeMask modes) { this->supported_swing_modes_ = modes; }
   void set_supported_presets(climate::ClimatePresetMask presets) { this->supported_presets_ = presets; }
-  void set_custom_presets(std::vector<const char *> presets) { this->supported_custom_presets_ = presets; }
-  void set_custom_fan_modes(std::vector<const char *> modes) { this->supported_custom_fan_modes_ = modes; }
+  void set_custom_presets(std::vector<const char *> presets) {
+    this->supported_custom_presets_ = presets;
+    this->refresh_supported_custom_modes_();
+  }
+  void set_custom_fan_modes(std::vector<const char *> modes) {
+    this->supported_custom_fan_modes_ = modes;
+    this->refresh_supported_custom_modes_();
+  }
 
   uint8_t TXData[TX_LEN];
   uint8_t RXData[RX_LEN];
@@ -327,6 +334,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   static uint16_t CalculateVrfCRC(const uint8_t *data, uint8_t len);
   bool is_protocol_(Protocol protocol) const { return this->protocol_ == protocol; }
   bool use_vrf_commands_() const { return this->is_protocol_(PROTOCOL_VRF) && this->constant_fan_; }
+  bool refresh_supported_custom_modes_();
 #ifdef USE_SWITCH
   void publish_constant_fan_switch_();
 #endif
@@ -355,6 +363,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   static bool DecodeVrfFanMode(uint8_t value, ClimateFanMode &fan_mode);
   static bool EncodeVrfCustomFanMode(StringRef custom_fan_mode, uint8_t &value);
   static bool DecodeVrfCustomFanMode(uint8_t value, const char *&custom_fan_mode);
+  static bool MapVrfCustomFanModeToXyeFanMode(StringRef custom_fan_mode, ClimateFanMode &fan_mode);
   uint8_t adjust_target_temperature(float target_temperature) const;
   float read_target_temperature(uint8_t target_temperature, bool fahrenheit_encoded) const;
 };
