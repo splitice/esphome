@@ -162,6 +162,11 @@ using climate::ClimatePreset;
 using climate::ClimateSwingMode;
 using sensor::Sensor;
 
+enum Protocol : uint8_t {
+  PROTOCOL_XYE = 0,
+  PROTOCOL_VRF = 1,
+};
+
 class Constants {
  public:
   static const char *const TAG;
@@ -207,7 +212,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void set_humidity_setpoint_sensor(Sensor *sensor) { this->humidity_sensor_ = sensor; }
   void set_power_sensor(Sensor *sensor) { this->power_sensor_ = sensor; }
   void set_use_fahrenheit(bool yesno) { this->use_fahrenheit_ = yesno; }
-  void set_vrf_protocol(bool yesno) { this->vrf_protocol_ = yesno; }
+  void set_protocol(Protocol protocol) { this->protocol_ = protocol; }
 #ifdef USE_SWITCH
   void set_use_fahrenheit_switch(switch_::Switch *sw) { this->use_fahrenheit_switch_ = sw; }
 #endif
@@ -257,7 +262,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   uint32_t response_timeout;
   bool followMeInit;
   uint8_t lastFollowMeTemperature;
-  bool vrf_protocol_{false};
+  Protocol protocol_{PROTOCOL_XYE};
   bool vrf_waiting_response_{false};
   uint8_t vrf_last_mode_nibble_{0x02};
   VrfPayload vrf_queue_[VRF_QUEUE_LEN];
@@ -303,6 +308,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
 
   static uint8_t CalculateCRC(uint8_t *Data, uint8_t len);
   static uint16_t CalculateVrfCRC(const uint8_t *data, uint8_t len);
+  bool is_protocol_(Protocol protocol) const { return this->protocol_ == protocol; }
   void ParseResponse(uint8_t cmdSent);
   void control_vrf(const ClimateCall &call);
   void update_vrf();

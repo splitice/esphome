@@ -70,6 +70,7 @@ midea_ac_ns = cg.esphome_ns.namespace("midea").namespace("ac")
 AirConditioner = midea_ac_ns.class_("AirConditioner", climate.Climate, cg.Component)
 StaticPressureNumber = midea_ac_ns.class_("StaticPressureNumber", number.Number, cg.Component)
 Capabilities = midea_ac_ns.namespace("Constants")
+Protocol = midea_ac_ns.enum("Protocol")
 
 def templatize(value):
     if isinstance(value, cv.Schema):
@@ -127,8 +128,8 @@ CUSTOM_PRESETS = {
 }
 
 PROTOCOLS = {
-    "xye": False,
-    "vrf": True,
+    "xye": Protocol.PROTOCOL_XYE,
+    "vrf": Protocol.PROTOCOL_VRF,
 }
 
 validate_modes = cv.enum(ALLOWED_CLIMATE_MODES, upper=True)
@@ -136,11 +137,7 @@ validate_presets = cv.enum(ALLOWED_CLIMATE_PRESETS, upper=True)
 validate_swing_modes = cv.enum(ALLOWED_CLIMATE_SWING_MODES, upper=True)
 validate_custom_fan_modes = cv.enum(CUSTOM_FAN_MODES, upper=True)
 validate_custom_presets = cv.enum(CUSTOM_PRESETS, upper=True)
-validate_protocol_name = cv.one_of(*PROTOCOLS, lower=True)
-
-
-def validate_protocol(value):
-    return PROTOCOLS[validate_protocol_name(value)]
+validate_protocol = cv.enum(PROTOCOLS, lower=True)
 
 CONFIG_SCHEMA = cv.All(
     climate.climate_schema(AirConditioner).extend(
@@ -374,7 +371,7 @@ async def to_code(config):
     await climate.register_climate(var, config)
     cg.add(var.set_period(config[CONF_PERIOD].total_milliseconds))
     cg.add(var.set_response_timeout(config[CONF_TIMEOUT].total_milliseconds))
-    cg.add(var.set_vrf_protocol(config[CONF_PROTOCOL]))
+    cg.add(var.set_protocol(config[CONF_PROTOCOL]))
     cg.add(var.set_use_fahrenheit(config[CONF_USE_FAHRENHEIT]))
     if CONF_TRANSMITTER_ID in config:
         cg.add_define("USE_REMOTE_TRANSMITTER")
