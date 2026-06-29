@@ -59,7 +59,7 @@ static void log_vrf_frame(const char *prefix, const uint8_t *frame, uint8_t len)
 }
 
 void AirConditioner::control(const ClimateCall &call) {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     this->control_vrf(call);
     return;
   }
@@ -92,7 +92,7 @@ void AirConditioner::setup() {
   } else {
     this->last_on_mode_ = ClimateMode::CLIMATE_MODE_COOL;
   }
-  if (this->is_protocol_(PROTOCOL_VRF) && !EncodeVrfMode(this->last_on_mode_, this->vrf_last_mode_nibble_)) {
+  if (this->vrf_protocol_available() && !EncodeVrfMode(this->last_on_mode_, this->vrf_last_mode_nibble_)) {
     this->last_on_mode_ = ClimateMode::CLIMATE_MODE_COOL;
     this->vrf_last_mode_nibble_ = 0x02;
   }
@@ -108,7 +108,7 @@ void AirConditioner::setup() {
   // Start up in Auto fan mode (since unit doesn't report it correctly)
   this->fan_mode = ClimateFanMode::CLIMATE_FAN_AUTO;
 
-  if (this->is_protocol_(PROTOCOL_VRF) && this->use_fahrenheit_) {
+  if (this->use_vrf_commands_() && this->use_fahrenheit_) {
     ESP_LOGW(Constants::TAG, "VRF protocol uses Celsius setpoints; Fahrenheit encoding will be ignored.");
   }
 
@@ -116,12 +116,58 @@ void AirConditioner::setup() {
   if (this->use_fahrenheit_switch_ != nullptr) {
     this->use_fahrenheit_switch_->publish_state(this->use_fahrenheit_);
   }
+  this->publish_constant_fan_switch_();
+#endif
+#ifdef USE_TEXT_SENSOR
+  this->publish_configured_protocol_();
 #endif
 }
 
+void AirConditioner::set_constant_fan(bool yesno) {
+  bool enabled = yesno && this->vrf_protocol_available();
+  if (yesno && !this->vrf_protocol_available()) {
+    ESP_LOGW(Constants::TAG, "Constant fan requires protocol: vrf; keeping XYE command mode.");
+  }
+
+  if (this->constant_fan_ == enabled) {
+#ifdef USE_SWITCH
+    this->publish_constant_fan_switch_();
+#endif
+    return;
+  }
+
+  this->constant_fan_ = enabled;
+  this->cancel_timeout("read-result");
+  this->cancel_timeout("vrf-read-result");
+  this->vrf_waiting_response_ = false;
+  this->vrf_queue_head_ = 0;
+  this->vrf_queue_tail_ = 0;
+  this->vrf_queue_count_ = 0;
+  this->controlState = STATE_SEND_C0;
+  this->queuedCommand = 0;
+  ESP_LOGI(Constants::TAG, "Constant fan %s; using %s command mode.", ONOFF(enabled), enabled ? "VRF" : "XYE");
+#ifdef USE_SWITCH
+  this->publish_constant_fan_switch_();
+#endif
+}
+
+#ifdef USE_SWITCH
+void AirConditioner::publish_constant_fan_switch_() {
+  if (this->constant_fan_switch_ != nullptr) {
+    this->constant_fan_switch_->publish_state(this->constant_fan_ && this->vrf_protocol_available());
+  }
+}
+#endif
+
+#ifdef USE_TEXT_SENSOR
+void AirConditioner::publish_configured_protocol_() {
+  set_text_sensor(this->configured_protocol_sensor_, this->configured_protocol_name_());
+}
+#endif
+
 // TODO: Not sure if we really need this.
 void AirConditioner::setPowerState(bool state) {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     ClimateMode mode = state ? this->last_on_mode_ : ClimateMode::CLIMATE_MODE_OFF;
     if (!this->queue_vrf_mode_command(mode) && state) {
       this->queue_vrf_mode_command(ClimateMode::CLIMATE_MODE_COOL);
@@ -395,7 +441,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
 }
 
 void AirConditioner::update() {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     this->update_vrf();
     return;
   }
@@ -981,9 +1027,9 @@ climate::ClimateTraits AirConditioner::traits() {
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   traits.set_visual_min_temperature(17);
   traits.set_visual_max_temperature(30);
-  traits.set_visual_temperature_step(this->is_protocol_(PROTOCOL_VRF) ? 0.5 : 1.0);
+  traits.set_visual_temperature_step(this->use_vrf_commands_() ? 0.5 : 1.0);
 
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     auto supported_modes = this->supported_modes_;
     supported_modes.erase(ClimateMode::CLIMATE_MODE_HEAT_COOL);
     if (supported_modes.empty()) {
@@ -1021,7 +1067,9 @@ climate::ClimateTraits AirConditioner::traits() {
 
 void AirConditioner::dump_config() {
   ESP_LOGCONFIG(Constants::TAG, "MideaXYE:");
-  ESP_LOGCONFIG(Constants::TAG, "  [x] Protocol: %s", this->is_protocol_(PROTOCOL_VRF) ? "VRF" : "XYE");
+  ESP_LOGCONFIG(Constants::TAG, "  [x] VRF protocol available: %s", ONOFF(this->vrf_protocol_available()));
+  ESP_LOGCONFIG(Constants::TAG, "  [x] Constant fan: %s", ONOFF(this->constant_fan_));
+  ESP_LOGCONFIG(Constants::TAG, "  [x] Command protocol: %s", this->use_vrf_commands_() ? "VRF" : "XYE");
   ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %dms", this->get_update_interval());
   ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %dms", this->response_timeout);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Use Fahrenheit: %d", this->use_fahrenheit_);
@@ -1035,7 +1083,7 @@ void AirConditioner::dump_config() {
 /* ACTIONS */
 
 void AirConditioner::do_follow_me(float temperature, bool beeper) {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     ESP_LOGW(Constants::TAG, "Follow-Me is not implemented for VRF protocol.");
     return;
   }
@@ -1073,7 +1121,7 @@ void AirConditioner::do_follow_me(float temperature, bool beeper) {
 }
 
 void AirConditioner::set_static_pressure(uint8_t static_pressure) {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     ESP_LOGW(Constants::TAG, "Static pressure control is not implemented for VRF protocol.");
     return;
   }
@@ -1102,7 +1150,7 @@ void AirConditioner::set_static_pressure(uint8_t static_pressure) {
 }
 
 void AirConditioner::do_swing_step() {
-  if (this->is_protocol_(PROTOCOL_VRF)) {
+  if (this->use_vrf_commands_()) {
     ESP_LOGW(Constants::TAG, "Swing step is not implemented for VRF protocol.");
     return;
   }

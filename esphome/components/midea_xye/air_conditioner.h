@@ -208,13 +208,27 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
 #endif
 #ifdef USE_TEXT_SENSOR
   void set_fan_speed_sensor(text_sensor::TextSensor *sensor) { this->fan_speed_sensor_ = sensor; }
+  void set_configured_protocol_sensor(text_sensor::TextSensor *sensor) {
+    this->configured_protocol_sensor_ = sensor;
+    this->publish_configured_protocol_();
+  }
 #endif
   void set_humidity_setpoint_sensor(Sensor *sensor) { this->humidity_sensor_ = sensor; }
   void set_power_sensor(Sensor *sensor) { this->power_sensor_ = sensor; }
   void set_use_fahrenheit(bool yesno) { this->use_fahrenheit_ = yesno; }
-  void set_protocol(Protocol protocol) { this->protocol_ = protocol; }
+  void set_protocol(Protocol protocol) {
+    this->protocol_ = protocol;
+    this->constant_fan_ = protocol == PROTOCOL_VRF;
+#ifdef USE_TEXT_SENSOR
+    this->publish_configured_protocol_();
+#endif
+  }
+  void set_constant_fan(bool yesno);
+  bool constant_fan_enabled() const { return this->constant_fan_; }
+  bool vrf_protocol_available() const { return this->protocol_ == PROTOCOL_VRF; }
 #ifdef USE_SWITCH
   void set_use_fahrenheit_switch(switch_::Switch *sw) { this->use_fahrenheit_switch_ = sw; }
+  void set_constant_fan_switch(switch_::Switch *sw) { this->constant_fan_switch_ = sw; }
 #endif
   void set_static_pressure_number(StaticPressureNumber *number) {
     this->static_pressure_number_ = number;
@@ -263,6 +277,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   bool followMeInit;
   uint8_t lastFollowMeTemperature;
   Protocol protocol_{PROTOCOL_XYE};
+  bool constant_fan_{false};
   bool vrf_waiting_response_{false};
   uint8_t vrf_last_mode_nibble_{0x02};
   VrfPayload vrf_queue_[VRF_QUEUE_LEN];
@@ -285,6 +300,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   bool use_fahrenheit_;
 #ifdef USE_SWITCH
   switch_::Switch *use_fahrenheit_switch_{nullptr};
+  switch_::Switch *constant_fan_switch_{nullptr};
 #endif
   Sensor *outdoor_sensor_{nullptr};
   Sensor *temperature_2a_sensor_{nullptr};
@@ -300,6 +316,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
 #endif
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor *fan_speed_sensor_{nullptr};
+  text_sensor::TextSensor *configured_protocol_sensor_{nullptr};
 #endif
   Sensor *humidity_sensor_{nullptr};
   Sensor *power_sensor_{nullptr};
@@ -309,6 +326,14 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   static uint8_t CalculateCRC(uint8_t *Data, uint8_t len);
   static uint16_t CalculateVrfCRC(const uint8_t *data, uint8_t len);
   bool is_protocol_(Protocol protocol) const { return this->protocol_ == protocol; }
+  bool use_vrf_commands_() const { return this->is_protocol_(PROTOCOL_VRF) && this->constant_fan_; }
+#ifdef USE_SWITCH
+  void publish_constant_fan_switch_();
+#endif
+#ifdef USE_TEXT_SENSOR
+  const char *configured_protocol_name_() const { return this->is_protocol_(PROTOCOL_VRF) ? "VRF" : "XYE"; }
+  void publish_configured_protocol_();
+#endif
   void ParseResponse(uint8_t cmdSent);
   void control_vrf(const ClimateCall &call);
   void update_vrf();

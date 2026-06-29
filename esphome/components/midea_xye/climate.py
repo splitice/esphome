@@ -63,6 +63,7 @@ CONF_DEFROST = "defrost"
 CONF_ERROR_FLAGS = "error_flags"
 CONF_PROTECT_FLAGS = "protect_flags"
 CONF_FAN_SPEED = "fan_speed"
+CONF_CONFIGURED_PROTOCOL = "configured_protocol"
 CONF_POWER_USAGE = "power_usage"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_STATIC_PRESSURE = "static_pressure"
@@ -237,6 +238,9 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_FAN_SPEED): text_sensor.text_sensor_schema(
                 icon=ICON_FAN,
+            ),
+            cv.Optional(CONF_CONFIGURED_PROTOCOL): text_sensor.text_sensor_schema(
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
 
             cv.Optional(CONF_POWER_USAGE): sensor.sensor_schema(
@@ -428,6 +432,9 @@ async def to_code(config):
     if CONF_FAN_SPEED in config:
         sens = await text_sensor.new_text_sensor(config[CONF_FAN_SPEED])
         cg.add(var.set_fan_speed_sensor(sens))
+    if CONF_CONFIGURED_PROTOCOL in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_CONFIGURED_PROTOCOL])
+        cg.add(var.set_configured_protocol_sensor(sens))
     if CONF_POWER_USAGE in config:
         sens = await sensor.new_sensor(config[CONF_POWER_USAGE])
         cg.add(var.set_power_sensor(sens))
