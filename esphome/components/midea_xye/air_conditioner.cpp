@@ -204,6 +204,7 @@ void AirConditioner::setPowerState(bool state) {
     if (!this->queue_vrf_mode_command(mode) && state) {
       this->queue_vrf_mode_command(ClimateMode::CLIMATE_MODE_COOL);
     }
+    this->send_queued_vrf_payload_if_idle_();
     this->publish_state();
     return;
   }
@@ -245,6 +246,15 @@ void AirConditioner::control_vrf(const ClimateCall &call) {
   if (need_publish) {
     this->publish_state();
   }
+  this->send_queued_vrf_payload_if_idle_();
+}
+
+void AirConditioner::send_queued_vrf_payload_if_idle_() {
+  if (!this->use_vrf_commands_() || this->vrf_waiting_response_ || this->vrf_queue_count_ == 0 ||
+      this->controlState == STATE_WAIT_DATA) {
+    return;
+  }
+  this->update_vrf();
 }
 
 bool AirConditioner::queue_vrf_payload(const uint8_t *payload, uint8_t len) {
@@ -262,6 +272,7 @@ bool AirConditioner::queue_vrf_payload(const uint8_t *payload, uint8_t len) {
   memcpy(queued.data, payload, len);
   this->vrf_queue_tail_ = (this->vrf_queue_tail_ + 1) % VRF_QUEUE_LEN;
   this->vrf_queue_count_++;
+  ESP_LOGD(Constants::TAG, "Queued VRF payload length %d, queue depth %d", len, this->vrf_queue_count_);
   return true;
 }
 
@@ -511,6 +522,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
                i);
       controlState = STATE_SEND_C0;
     }
+    this->send_queued_vrf_payload_if_idle_();
   });
 }
 
