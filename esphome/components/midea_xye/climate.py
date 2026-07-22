@@ -67,6 +67,8 @@ CONF_CONFIGURED_PROTOCOL = "configured_protocol"
 CONF_POWER_USAGE = "power_usage"
 CONF_HUMIDITY_SETPOINT = "humidity_setpoint"
 CONF_STATIC_PRESSURE = "static_pressure"
+CONF_VRF_CONTROLLER_ID = "vrf_controller_id"
+CONF_VRF_UNIT_ID = "vrf_unit_id"
 midea_ac_ns = cg.esphome_ns.namespace("midea").namespace("ac")
 AirConditioner = midea_ac_ns.class_("AirConditioner", climate.Climate, cg.Component)
 StaticPressureNumber = midea_ac_ns.class_("StaticPressureNumber", number.Number, cg.Component)
@@ -147,6 +149,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_PERIOD, default="1s"): cv.time_period,
             cv.Optional(CONF_TIMEOUT, default="100ms"): cv.time_period,
             cv.Optional(CONF_PROTOCOL, default="xye"): validate_protocol,
+            cv.Optional(CONF_VRF_UNIT_ID, default=0x00): cv.hex_uint8_t,
+            cv.Optional(CONF_VRF_CONTROLLER_ID, default=0x64): cv.hex_uint8_t,
             cv.Optional(CONF_USE_FAHRENHEIT, default=False): cv.boolean,
             cv.OnlyWith(CONF_TRANSMITTER_ID, "remote_transmitter"): cv.use_id(
                 remote_transmitter.RemoteTransmitterComponent
@@ -376,6 +380,8 @@ async def to_code(config):
     cg.add(var.set_period(config[CONF_PERIOD].total_milliseconds))
     cg.add(var.set_response_timeout(config[CONF_TIMEOUT].total_milliseconds))
     cg.add(var.set_protocol(config[CONF_PROTOCOL]))
+    cg.add(var.set_vrf_unit_id(config[CONF_VRF_UNIT_ID]))
+    cg.add(var.set_vrf_controller_id(config[CONF_VRF_CONTROLLER_ID]))
     cg.add(var.set_use_fahrenheit(config[CONF_USE_FAHRENHEIT]))
     if CONF_TRANSMITTER_ID in config:
         cg.add_define("USE_REMOTE_TRANSMITTER")

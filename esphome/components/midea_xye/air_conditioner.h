@@ -150,6 +150,8 @@
 #define VRF_FRAME_MAX_LEN (11 + VRF_PAYLOAD_MAX_LEN)
 #define VRF_RX_MAX_LEN 64
 #define VRF_QUEUE_LEN 4
+#define VRF_DEFAULT_UNIT_ID 0x00
+#define VRF_DEFAULT_CONTROLLER_ID 0x64
 
 namespace esphome {
 namespace midea {
@@ -216,6 +218,8 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   void set_humidity_setpoint_sensor(Sensor *sensor) { this->humidity_sensor_ = sensor; }
   void set_power_sensor(Sensor *sensor) { this->power_sensor_ = sensor; }
   void set_use_fahrenheit(bool yesno) { this->use_fahrenheit_ = yesno; }
+  void set_vrf_unit_id(uint8_t unit_id) { this->vrf_unit_id_ = unit_id; }
+  void set_vrf_controller_id(uint8_t controller_id) { this->vrf_controller_id_ = controller_id; }
   void set_protocol(Protocol protocol) {
     this->protocol_ = protocol;
     this->constant_fan_ = protocol == PROTOCOL_VRF;
@@ -286,6 +290,9 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   Protocol protocol_{PROTOCOL_XYE};
   bool constant_fan_{false};
   bool vrf_waiting_response_{false};
+  bool vrf_poll_next_{true};
+  uint8_t vrf_unit_id_{VRF_DEFAULT_UNIT_ID};
+  uint8_t vrf_controller_id_{VRF_DEFAULT_CONTROLLER_ID};
   uint8_t vrf_last_mode_nibble_{0x02};
   VrfPayload vrf_queue_[VRF_QUEUE_LEN];
   uint8_t vrf_queue_head_{0};

@@ -42,6 +42,9 @@ climate:
     name: Heatpump
     period: 1s                  # Optional. Defaults to 1s
     timeout: 100ms              # Optional. Defaults to 100ms
+    protocol: xye               # Optional. Use vrf for D1D2 VRF command frames.
+    vrf_unit_id: 0x00           # Optional. D1D2 indoor unit ID when protocol is vrf.
+    vrf_controller_id: 0x64     # Optional. D1D2 controller/source ID when protocol is vrf.
     fahrenheit: false           # Optional. Defaults to false.
     #beeper: true               # Optional. Beep on commands.
     visual:                     # Optional. Example of visual settings override.

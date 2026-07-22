@@ -104,6 +104,7 @@ void AirConditioner::setup() {
   followMeInit = false;
   lastFollowMeTemperature = 0;
   this->vrf_waiting_response_ = false;
+  this->vrf_poll_next_ = true;
   this->vrf_queue_head_ = 0;
   this->vrf_queue_tail_ = 0;
   this->vrf_queue_count_ = 0;
@@ -144,6 +145,7 @@ void AirConditioner::set_constant_fan(bool yesno) {
   this->cancel_timeout("read-result");
   this->cancel_timeout("vrf-read-result");
   this->vrf_waiting_response_ = false;
+  this->vrf_poll_next_ = true;
   this->vrf_queue_head_ = 0;
   this->vrf_queue_tail_ = 0;
   this->vrf_queue_count_ = 0;
@@ -546,6 +548,12 @@ void AirConditioner::update() {
       this->update_vrf();
       return;
     }
+    if (this->vrf_poll_next_ && this->controlState != STATE_WAIT_DATA) {
+      this->vrf_poll_next_ = false;
+      this->update_vrf();
+      return;
+    }
+    this->vrf_poll_next_ = true;
     this->update_xye(true);
     return;
   }
@@ -646,7 +654,8 @@ void AirConditioner::update_vrf() {
     return;
   }
 
-  // VRF command mode uses the richer XYE C0 query frame for periodic status.
+  const uint8_t payload[] = {VRF_POLL_REQUEST};
+  this->send_vrf_payload(payload, sizeof(payload));
 }
 
 void AirConditioner::send_vrf_payload(const uint8_t *payload, uint8_t len) {
@@ -658,9 +667,9 @@ void AirConditioner::send_vrf_payload(const uint8_t *payload, uint8_t len) {
   uint8_t frame[VRF_FRAME_MAX_LEN];
   frame[0] = PREAMBLE;
   frame[1] = VRF_COMMAND_STATUS;
-  frame[2] = SERVER_ID;
+  frame[2] = this->vrf_unit_id_;
   frame[3] = 0x00;
-  frame[4] = CLIENT_ID;
+  frame[4] = this->vrf_controller_id_;
   frame[5] = 0x00;
   frame[6] = len;
   memcpy(&frame[7], payload, len);
@@ -758,23 +767,33 @@ void AirConditioner::parse_vrf_response(const uint8_t *frame, uint8_t len) {
     return;
   }
 
+  if (frame[4] != this->vrf_unit_id_) {
+    ESP_LOGD(Constants::TAG, "Ignoring VRF status from unit %02X; configured unit is %02X", frame[4],
+             this->vrf_unit_id_);
+    return;
+  }
+
   uint8_t pwr_mode = frame[8];
   uint8_t mode_nibble = pwr_mode & 0x0F;
   bool powered = (pwr_mode & 0xF0) == 0x40;
   bool need_publish = false;
+  ClimateMode decoded_mode;
+  bool mode_decoded = DecodeVrfMode(mode_nibble, decoded_mode);
+
+  if (mode_decoded) {
+    this->last_on_mode_ = decoded_mode;
+    this->vrf_last_mode_nibble_ = mode_nibble;
+  } else {
+    ESP_LOGW(Constants::TAG, "Received unknown VRF mode nibble %02X", mode_nibble);
+  }
 
   if (powered) {
-    ClimateMode decoded_mode;
-    if (DecodeVrfMode(mode_nibble, decoded_mode)) {
+    if (mode_decoded) {
       update_property(this->mode, decoded_mode, need_publish);
-      this->last_on_mode_ = decoded_mode;
-      this->vrf_last_mode_nibble_ = mode_nibble;
       climate::ClimateAction action =
           (decoded_mode == ClimateMode::CLIMATE_MODE_FAN_ONLY) ? climate::CLIMATE_ACTION_FAN
                                                                : climate::CLIMATE_ACTION_IDLE;
       update_property(this->action, action, need_publish);
-    } else {
-      ESP_LOGW(Constants::TAG, "Received unknown VRF mode nibble %02X", mode_nibble);
     }
   } else {
     update_property(this->mode, ClimateMode::CLIMATE_MODE_OFF, need_publish);
@@ -1260,6 +1279,8 @@ void AirConditioner::dump_config() {
   ESP_LOGCONFIG(Constants::TAG, "  [x] VRF protocol available: %s", ONOFF(this->vrf_protocol_available()));
   ESP_LOGCONFIG(Constants::TAG, "  [x] Constant fan: %s", ONOFF(this->constant_fan_));
   ESP_LOGCONFIG(Constants::TAG, "  [x] Command protocol: %s", this->use_vrf_commands_() ? "VRF" : "XYE");
+  ESP_LOGCONFIG(Constants::TAG, "  [x] VRF unit ID: 0x%02X", this->vrf_unit_id_);
+  ESP_LOGCONFIG(Constants::TAG, "  [x] VRF controller ID: 0x%02X", this->vrf_controller_id_);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %dms", this->get_update_interval());
   ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %dms", this->response_timeout);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Use Fahrenheit: %d", this->use_fahrenheit_);
