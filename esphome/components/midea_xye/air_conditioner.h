@@ -341,6 +341,7 @@ class AirConditioner : public PollingComponent, public climate::Climate, public 
   static uint16_t CalculateVrfCRC(const uint8_t *data, uint8_t len);
   bool is_protocol_(Protocol protocol) const { return this->protocol_ == protocol; }
   bool use_vrf_commands_() const { return this->is_protocol_(PROTOCOL_VRF) && this->constant_fan_; }
+  void queue_xye_off_command_();
   bool refresh_supported_custom_modes_();
 #ifdef USE_SWITCH
   void publish_constant_fan_switch_();

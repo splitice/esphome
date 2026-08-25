@@ -202,6 +202,15 @@ void AirConditioner::publish_configured_protocol_() {
 // TODO: Not sure if we really need this.
 void AirConditioner::setPowerState(bool state) {
   if (this->use_vrf_commands_()) {
+    if (!state) {
+      this->queue_xye_off_command_();
+      this->publish_state();
+      if (!this->vrf_waiting_response_ && this->controlState != STATE_WAIT_DATA) {
+        this->update_xye(false);
+      }
+      return;
+    }
+
     ClimateMode mode = state ? this->last_on_mode_ : ClimateMode::CLIMATE_MODE_OFF;
     if (!this->queue_vrf_mode_command(mode) && state) {
       this->queue_vrf_mode_command(ClimateMode::CLIMATE_MODE_COOL);
@@ -223,25 +232,54 @@ void AirConditioner::setPowerState(bool state) {
   }
 }
 
+void AirConditioner::queue_xye_off_command_() {
+  // The D1D2 power/mode field retains the active mode while off. Use the
+  // established XYE C3 OFF command instead until the D1D2 off behavior is
+  // verified on this hardware.
+  this->mode = ClimateMode::CLIMATE_MODE_OFF;
+  this->action = climate::CLIMATE_ACTION_OFF;
+  this->followMeInit = false;
+
+  // OFF supersedes queued D1D2 updates. In particular, an already queued ON
+  // command must not be sent after the XYE OFF command.
+  this->vrf_queue_head_ = 0;
+  this->vrf_queue_tail_ = 0;
+  this->vrf_queue_count_ = 0;
+  this->queuedCommand = 0;
+
+  if (this->controlState != STATE_WAIT_DATA) {
+    this->controlState = STATE_SEND_C3;
+  } else {
+    this->queuedCommand = STATE_SEND_C3;
+  }
+  ESP_LOGI(Constants::TAG, "Using XYE C3 command for OFF while VRF is enabled.");
+}
+
 void AirConditioner::control_vrf(const ClimateCall &call) {
   bool need_publish = false;
+  bool xye_off_requested = call.get_mode().has_value() && call.get_mode().value() == ClimateMode::CLIMATE_MODE_OFF;
   ESP_LOGD(Constants::TAG, "VRF control call received");
 
   if (call.get_mode().has_value()) {
     ESP_LOGD(Constants::TAG, "  Mode command: %s",
              LOG_STR_ARG(climate::climate_mode_to_string(call.get_mode().value())));
-    need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
+    if (xye_off_requested) {
+      this->queue_xye_off_command_();
+      need_publish = true;
+    } else {
+      need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
+    }
   }
-  if (call.get_fan_mode().has_value()) {
+  if (!xye_off_requested && call.get_fan_mode().has_value()) {
     ESP_LOGD(Constants::TAG, "  Fan command: %s",
              LOG_STR_ARG(climate::climate_fan_mode_to_string(call.get_fan_mode().value())));
     need_publish |= this->queue_vrf_fan_command(call.get_fan_mode().value());
   }
-  if (call.has_custom_fan_mode()) {
+  if (!xye_off_requested && call.has_custom_fan_mode()) {
     ESP_LOGD(Constants::TAG, "  Custom fan command: %s", call.get_custom_fan_mode().c_str());
     need_publish |= this->queue_vrf_custom_fan_command(call.get_custom_fan_mode());
   }
-  if (call.get_target_temperature().has_value()) {
+  if (!xye_off_requested && call.get_target_temperature().has_value()) {
     ESP_LOGD(Constants::TAG, "  Target temperature command: %.1f", call.get_target_temperature().value());
     need_publish |= this->queue_vrf_temperature_command(call.get_target_temperature().value());
   }
@@ -254,6 +292,10 @@ void AirConditioner::control_vrf(const ClimateCall &call) {
 
   if (need_publish) {
     this->publish_state();
+  }
+  if (this->controlState == STATE_SEND_C3 && !this->vrf_waiting_response_) {
+    this->update_xye(false);
+    return;
   }
   this->send_queued_vrf_payload_if_idle_();
 }
@@ -511,7 +553,7 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
       if (cmdSent != 0xC3) {
         ParseResponse(cmdSent);
       }
-      if (queuedCommand != 0 && !this->use_vrf_commands_()) {
+      if (queuedCommand != 0 && (!this->use_vrf_commands_() || queuedCommand == STATE_SEND_C3)) {
         controlState = queuedCommand;
         queuedCommand = 0;
       } else {
@@ -544,6 +586,13 @@ void AirConditioner::sendRecv(uint8_t cmdSent) {
 
 void AirConditioner::update() {
   if (this->use_vrf_commands_()) {
+    if (this->controlState == STATE_SEND_C3) {
+      if (this->vrf_waiting_response_) {
+        return;
+      }
+      this->update_xye(false);
+      return;
+    }
     if (this->vrf_waiting_response_ || this->vrf_queue_count_ > 0) {
       this->update_vrf();
       return;

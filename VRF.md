@@ -280,7 +280,9 @@ setpoint, fan, and swing status, and alternates it with the existing XYE `C0`
 query frame so current temperature and the C0-backed auxiliary temperature
 values can still be populated. In that hybrid mode, C0 is treated as temperature
 readback only; mode, setpoint, fan, swing, and preset remain owned by the VRF
-command/status path. The XYE `C3`, `C4`, and `C6` frames are skipped.
+command/status path. The XYE `C4` and `C6` frames are skipped. As a temporary
+hardware-compatibility fallback, ESPHome sends OFF with the legacy XYE `C3`
+command (`C3` mode byte `00`) rather than the D1D2 packed power/mode update.
 
 ### D1D2 Field-Update Payloads
 
