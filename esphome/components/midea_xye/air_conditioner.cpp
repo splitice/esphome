@@ -270,16 +270,17 @@ void AirConditioner::control_vrf(const ClimateCall &call) {
       need_publish |= this->queue_vrf_mode_command(call.get_mode().value());
     }
   }
-  if (!xye_off_requested && call.get_fan_mode().has_value()) {
+  bool vrf_controls_allowed = this->mode != ClimateMode::CLIMATE_MODE_OFF;
+  if (vrf_controls_allowed && call.get_fan_mode().has_value()) {
     ESP_LOGD(Constants::TAG, "  Fan command: %s",
              LOG_STR_ARG(climate::climate_fan_mode_to_string(call.get_fan_mode().value())));
     need_publish |= this->queue_vrf_fan_command(call.get_fan_mode().value());
   }
-  if (!xye_off_requested && call.has_custom_fan_mode()) {
+  if (vrf_controls_allowed && call.has_custom_fan_mode()) {
     ESP_LOGD(Constants::TAG, "  Custom fan command: %s", call.get_custom_fan_mode().c_str());
     need_publish |= this->queue_vrf_custom_fan_command(call.get_custom_fan_mode());
   }
-  if (!xye_off_requested && call.get_target_temperature().has_value()) {
+  if (vrf_controls_allowed && call.get_target_temperature().has_value()) {
     ESP_LOGD(Constants::TAG, "  Target temperature command: %.1f", call.get_target_temperature().value());
     need_publish |= this->queue_vrf_temperature_command(call.get_target_temperature().value());
   }
